@@ -233,6 +233,25 @@ public class IntegrityAndSecurityTests : IDisposable
     }
 
     [Fact]
+    public void StressTest_HighSpeedStreaming()
+    {
+        // Arrange - 25MB Stress Test
+        byte[] largeData = new byte[25 * 1024 * 1024];
+        new Random(1337).NextBytes(largeData);
+        File.WriteAllBytes(_originalFile, largeData);
+        string originalHash = HashHelper.ComputeSha256(_originalFile);
+
+        // Act
+        _aesService.EncryptFile(_originalFile, _encryptedFile, _password);
+        _aesService.DecryptFile(_encryptedFile, _decryptedFile, _password);
+        string decryptedHash = HashHelper.ComputeSha256(_decryptedFile);
+
+        // Assert
+        Assert.Equal(originalHash, decryptedHash);
+        Assert.Equal(largeData.Length, new FileInfo(_decryptedFile).Length);
+    }
+
+    [Fact]
     public void MultipleEncryptions_DifferentIVs()
     {
         // Arrange - Encrypt same file twice

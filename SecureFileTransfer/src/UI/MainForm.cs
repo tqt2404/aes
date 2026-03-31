@@ -20,13 +20,13 @@ public partial class MainForm : Form
     private readonly SenderView _senderView;
     private readonly ReceiverView _receiverView;
 
-    private Panel pnlSidebar;
-    private Panel pnlContent;
-    private Panel pnlBottom;
-    private TextBox txtLogs;
-    private ProgressBar prgTransfer;
-    private Label lblStatus;
-    private Button btnOpenFolder;
+    private Panel pnlSidebar = default!;
+    private Panel pnlContent = default!;
+    private Panel pnlBottom = default!;
+    private TextBox txtLogs = default!;
+    private ProgressBar prgTransfer = default!;
+    private Label lblStatus = default!;
+    private Button btnOpenFolder = default!;
     private string _lastSavedPath = "";
 
     // Drag move support

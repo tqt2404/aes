@@ -1,4 +1,4 @@
-# Visual Studio / C#
+# .NET / Visual Studio
 bin/
 obj/
 .vs/
@@ -7,19 +7,25 @@ obj/
 *.userosscache
 *.sln.docstates
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-.venv/
-env/
-venv/
-ENV/
+# Build & Executables
+*.exe
+*.dll
+*.pdb
+
+# Security Data & Temporary Files
+# Do NOT push test contents or encrypted artifacts
+*.enc
+*.tmp
+*.log
+top_secret.txt
+automation_temp/
+attack_demo/
+attack_demo*
+
+# Office temporary files
+~$*
 
 # OS specific
 Thumbs.db
 Desktop.ini
 .DS_Store
-
-# Office temporary files
-~$*

@@ -24,9 +24,9 @@ public class SenderView : UserControl
     public event Action<string>? RequestOpenFolder;
 
     // Controls
-    private TextBox txtIp, txtPort, txtKey;
-    private Label lblFileName;
-    private Button btnSelectFile, btnSend, btnEncryptOnly;
+    private TextBox txtIp = default!, txtPort = default!, txtKey = default!;
+    private Label lblFileName = default!;
+    private Button btnSelectFile = default!, btnSend = default!, btnEncryptOnly = default!;
 
     public SenderView(FileTransferManager manager, AppConfig config)
     {
@@ -103,7 +103,7 @@ public class SenderView : UserControl
             if (e.Data!.GetData(DataFormats.FileDrop) is string[] f && f.Length > 0) {
                 _selectedFile = f[0];
                 lblFileName.Text = Path.GetFileName(_selectedFile);
-                Logger.Log($"📦 Kéo thả tệp: {lblFileName.Text}");
+                Logger.Log($"Chọn tệp qua kéo thả: {lblFileName.Text}");
             }
         };
     }
@@ -152,8 +152,9 @@ public class SenderView : UserControl
                 TransferProgressChanged?.Invoke((int)pr.ProgressPercentage, $"Đang truyền: {pr.ProgressPercentage:F1}% | {pr.Speed / 1024:F1} KB/s");
             });
             
+            
             await _manager.EncryptAndSendAsync(_selectedFile, txtIp.Text.Trim(), int.Parse(txtPort.Text), txtKey.Text.Trim(), p);
-            TransferProgressChanged?.Invoke(100, "✅ Truyền mạng thành công!");
+            TransferProgressChanged?.Invoke(100, "Truyền nhận dữ liệu thành công.");
             MessageBox.Show("Gửi file thành công!", "Hoàn tất", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (SocketException ex) { HandleError("Lỗi Mạng", ex); }
@@ -171,7 +172,7 @@ public class SenderView : UserControl
             try {
                 SetLoading(true);
                 await _manager.LocalEncryptAsync(_selectedFile, sfd.FileName, txtKey.Text);
-                TransferProgressChanged?.Invoke(100, $"✅ Mã hóa nội bộ thành công tại: {sfd.FileName}");
+                TransferProgressChanged?.Invoke(100, $"Mã hóa nội bộ thành công: {Path.GetFileName(sfd.FileName)}");
                 RequestOpenFolder?.Invoke(sfd.FileName);
                 MessageBox.Show("Mã hóa thành công!", "Thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -188,10 +189,10 @@ public class SenderView : UserControl
         if (!InputValidator.IsValidPort(txtPort.Text)) { ShowWarning("Số cổng (Port) không hợp lệ (1-65535)!"); return false; }
 
         if ((txtIp.Text == "127.0.0.1" || txtIp.Text.ToLower() == "localhost") && !_isReceiverReady) {
-            DialogResult dr = MessageBox.Show(
-                "Bạn đang gửi qua Localhost (127.0.0.1) nhưng chưa khởi động 'Bên Nhận' (Listener)!\nTiếp tục gửi sẽ bị lỗi Connection Refused. Cố tình gửi?",
-                "Cảnh báo", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-            if (dr == DialogResult.No) return false;
+            MessageBox.Show(
+                "Vui lòng khởi động 'Bên Nhận' (Listener) trước khi thực hiện gửi dữ liệu qua Localhost!",
+                "Yêu cầu hệ thống", MessageBoxButtons.OK, MessageBoxIcon.Stop);
+            return false;
         }
 
         return true;
@@ -205,8 +206,8 @@ public class SenderView : UserControl
 
     private void ShowWarning(string msg) => MessageBox.Show(msg, "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     private void HandleError(string prefix, Exception ex) {
-        Logger.Log($"❌ {prefix}: {ex.Message}");
+        Logger.Log($"{prefix}: {ex.Message}");
         MessageBox.Show($"{prefix}: {ex.Message}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        TransferProgressChanged?.Invoke(0, "❌ " + prefix + " thất bại.");
+        TransferProgressChanged?.Invoke(0, prefix + " thất bại.");
     }
 }

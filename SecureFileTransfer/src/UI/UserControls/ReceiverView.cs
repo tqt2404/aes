@@ -28,9 +28,9 @@ public class ReceiverView : UserControl
     public event Action<string>? RequestOpenFolder;
     public event Action<bool>? ListeningStateChanged; // Gửi signal (để update UI hay SenderView)
 
-    private TextBox txtPort, txtKey;
-    private Label lblFileName;
-    private Button btnSelectEncFile, btnReceiveNetwork, btnDecryptOnly;
+    private TextBox txtPort = default!, txtKey = default!;
+    private Label lblFileName = default!;
+    private Button btnSelectEncFile = default!, btnReceiveNetwork = default!, btnDecryptOnly = default!;
 
     public ReceiverView(FileTransferManager manager, AppConfig config)
     {
@@ -189,7 +189,7 @@ public class ReceiverView : UserControl
             try {
                 SetLoading(true);
                 await _manager.LocalDecryptAsync(_selectedEncFile, sfd.FileName, txtKey.Text);
-                TransferProgressChanged?.Invoke(100, $"✅ Giải mã hoàn tất tại: {sfd.FileName}");
+                TransferProgressChanged?.Invoke(100, $"Giải mã hoàn tất: {Path.GetFileName(sfd.FileName)}");
                 RequestOpenFolder?.Invoke(sfd.FileName);
                 MessageBox.Show("Giải mã thành công!", "Hoàn tất", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -210,8 +210,8 @@ public class ReceiverView : UserControl
     private void ShowWarning(string msg) => MessageBox.Show(msg, "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     private void HandleError(string prefix, Exception ex, string? customMsg = null) {
         string error = customMsg ?? ex.Message;
-        Logger.Log($"❌ {prefix}: {error}");
+        Logger.Log($"{prefix}: {error}");
         MessageBox.Show($"{prefix}:\n{error}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        TransferProgressChanged?.Invoke(0, "❌ " + prefix + " thất bại.");
+        TransferProgressChanged?.Invoke(0, prefix + " thất bại.");
     }
 }

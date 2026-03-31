@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text;
+
 namespace SecureFileTransfer.Models;
 
 public enum TransferState
@@ -16,7 +19,18 @@ public class FileMetadata
 {
     public string FileName { get; set; } = string.Empty;
     public long FileSize { get; set; }
-    public string Sha256Hash { get; set; } = string.Empty;  // ✅ NEW: For integrity verification
+    public string Sha256Hash { get; set; } = string.Empty;
+
+    public byte[] Serialize()
+    {
+        return Encoding.UTF8.GetBytes(JsonSerializer.Serialize(this));
+    }
+
+    public static FileMetadata? Deserialize(byte[] data)
+    {
+        if (data == null || data.Length == 0) return null;
+        return JsonSerializer.Deserialize<FileMetadata>(Encoding.UTF8.GetString(data));
+    }
 }
 
 public class TransferProgress

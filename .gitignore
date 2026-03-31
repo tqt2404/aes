@@ -17,15 +17,20 @@ obj/
 *.enc
 *.tmp
 *.log
-top_secret.txt
+*.txt
+!README.txt
+!INSTALL.txt
+!*.md
+
+# Test & Automation artifacts
 automation_temp/
 attack_demo/
 attack_demo*
-
-# Office temporary files
-~$*
+test_data/
+**/TestResults/
 
 # OS specific
 Thumbs.db
 Desktop.ini
 .DS_Store
+~$*

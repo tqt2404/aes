@@ -1,4 +1,4 @@
-using System;
+ using System;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -24,10 +24,14 @@ public partial class MainForm : Form
     private Panel pnlContent = default!;
     private Panel pnlBottom = default!;
     private TextBox txtLogs = default!;
-    private ProgressBar prgTransfer = default!;
+    private ModernProgressBar prgTransfer = default!;
     private Label lblStatus = default!;
-    private Button btnOpenFolder = default!;
+    private ModernButton btnOpenFolder = default!;
+    private ModernButton btnThemeToggle = default!;
     private string _lastSavedPath = "";
+    private Panel pnlActiveIndicator = default!;
+    private System.Windows.Forms.Timer _fadeTimer = default!;
+    private float _opacity = 0;
 
     // Drag move support
     public const int WM_NCLBUTTONDOWN = 0xA1;
@@ -54,6 +58,17 @@ public partial class MainForm : Form
         _receiverView.ListeningStateChanged += (isListening) => {
             _senderView.SetReceiverReadyStatus(isListening);
         };
+
+        _fadeTimer = new System.Windows.Forms.Timer { Interval = 20 };
+        _fadeTimer.Tick += (s, e) => {
+            _opacity += 0.1f;
+            if (_opacity >= 1.0f) {
+                _opacity = 1.0f;
+                _fadeTimer.Stop();
+            }
+        };
+
+        ThemeColors.ThemeChanged += ApplyTheme;
 
         InitializeComponent();
     }
@@ -92,14 +107,18 @@ public partial class MainForm : Form
         header.Controls.Add(lblTitle);
         
         // Window Control Buttons
-        var btnClose = new Button { Text = "✕", Dock = DockStyle.Right, Width = 40, FlatStyle = FlatStyle.Flat, ForeColor = Color.Gray, BackColor = ThemeColors.SidebarBackground, Cursor = Cursors.Hand };
+        var btnClose = new Button { Text = "✕", Dock = DockStyle.Right, Width = 40, FlatStyle = FlatStyle.Flat, ForeColor = Color.Gray, Cursor = Cursors.Hand };
         btnClose.FlatAppearance.BorderSize = 0;
         btnClose.Click += (s, e) => Application.Exit();
         
-        var btnMinimize = new Button { Text = "―", Dock = DockStyle.Right, Width = 40, FlatStyle = FlatStyle.Flat, ForeColor = Color.Gray, BackColor = ThemeColors.SidebarBackground, Cursor = Cursors.Hand };
+        var btnMinimize = new Button { Text = "―", Dock = DockStyle.Right, Width = 40, FlatStyle = FlatStyle.Flat, ForeColor = Color.Gray, Cursor = Cursors.Hand };
         btnMinimize.FlatAppearance.BorderSize = 0;
         btnMinimize.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
+
+        btnThemeToggle = new ModernButton { Text = "🌙", Dock = DockStyle.Right, Width = 40, BackColor = Color.Transparent };
+        btnThemeToggle.Click += (s, e) => ThemeColors.ToggleTheme();
         
+        header.Controls.Add(btnThemeToggle);
         header.Controls.Add(btnMinimize);
         header.Controls.Add(btnClose);
         
@@ -129,11 +148,10 @@ public partial class MainForm : Form
         // Bottom Panel
         pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 160, BackColor = ThemeColors.WindowBackground, Padding = new Padding(15) };
         
-        var pnlStatus = new Panel { Dock = DockStyle.Top, Height = 50 };
-        prgTransfer = new ProgressBar { Dock = DockStyle.Top, Height = 10, Value = 0, Style = ProgressBarStyle.Continuous };
-        lblStatus = new Label { Text = "Hệ thống sẵn sàng.", Dock = DockStyle.Left, ForeColor = ThemeColors.Success, Font = new Font("Segoe UI", 9F, FontStyle.Italic), AutoSize = true, Padding = new Padding(0, 10, 0, 0) };
-        btnOpenFolder = new Button { Text = "MỞ THƯ MỤC LƯU", Dock = DockStyle.Right, Width = 180, Height = 30, BackColor = ThemeColors.Primary, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand, Visible = false, Margin = new Padding(0, 10, 0, 0), Font = new Font("Segoe UI", 9F, FontStyle.Bold) };
-        btnOpenFolder.FlatAppearance.BorderSize = 0;
+        var pnlStatus = new Panel { Dock = DockStyle.Top, Height = 60, Padding = new Padding(0, 5, 0, 5) };
+        prgTransfer = new ModernProgressBar { Dock = DockStyle.Top, Height = 6, Maximum = 100 };
+        lblStatus = new Label { Text = "Hệ thống sẵn sàng.", Dock = DockStyle.Left, ForeColor = ThemeColors.TextSecondary, Font = new Font("Segoe UI", 9F, FontStyle.Italic), AutoSize = true, Padding = new Padding(0, 15, 0, 0) };
+        btnOpenFolder = new ModernButton { Text = "MỞ THƯ MỤC LƯU", Dock = DockStyle.Right, Width = 180, Height = 35, BackColor = ThemeColors.Primary, ForeColor = Color.White, Visible = false };
         btnOpenFolder.Click += (s, e) => OpenExplorer(_lastSavedPath);
         
         pnlStatus.Controls.Add(lblStatus);
@@ -151,52 +169,81 @@ public partial class MainForm : Form
         this.Controls.Add(pnlContent);
         pnlContent.BringToFront();
 
-        // Handle System Logs
-        Logger.OnLog += m => Invoke(() => { 
-            txtLogs.AppendText($"[{DateTime.Now:HH:mm:ss}] {m}{Environment.NewLine}"); 
-            txtLogs.ScrollToCaret(); 
-        });
+        // Sidebar Indicator
+        pnlActiveIndicator = new Panel { Width = 4, Height = 60, BackColor = ThemeColors.TextAccent, Visible = false };
+        pnlSidebar.Controls.Add(pnlActiveIndicator);
 
         // Default View
-        SwitchView(_senderView, btnNavSend);
+        SwitchView(_senderView, (ModernButton)btnNavSend);
     }
 
-    private Button CreateSidebarButton(string text, string icon)
+    private ModernButton CreateSidebarButton(string text, string icon)
     {
-        var btn = new Button { 
+        var btn = new ModernButton { 
             Text = text, 
             Dock = DockStyle.Top, 
             Height = 60, 
-            FlatStyle = FlatStyle.Flat, 
             ForeColor = ThemeColors.TextSecondary, 
             BackColor = ThemeColors.SidebarBackground, 
-            TextAlign = ContentAlignment.MiddleLeft, 
             Font = ThemeColors.TitleFont,
-            Cursor = Cursors.Hand,
             Padding = new Padding(25, 0, 0, 0) 
         };
-        btn.FlatAppearance.BorderSize = 0;
         return btn;
     }
 
-    private void SwitchView(UserControl view, Button activeButton)
+    private void SwitchView(UserControl view, ModernButton activeButton)
     {
-        // Reset styles
-        foreach (Control ctrl in pnlSidebar.Controls) {
-            if (ctrl is Button b) {
-                b.BackColor = ThemeColors.SidebarBackground;
-                b.ForeColor = ThemeColors.TextSecondary;
-                b.Font = new Font(b.Font, FontStyle.Regular);
-            }
-        }
+        // View Transition Animation logic
+        _opacity = 0;
+        _fadeTimer.Start();
 
-        // Active style
+        // Update sidebar buttons visual state
+        ApplyThemeSidebar();
+
+        // Active style over the themed base
         activeButton.BackColor = ThemeColors.SidebarButtonActive;
-        activeButton.ForeColor = ThemeColors.Primary;
-        activeButton.Font = new Font(activeButton.Font, FontStyle.Bold);
+        activeButton.ForeColor = ThemeColors.TextAccent;
+        
+        pnlActiveIndicator.Location = new Point(0, activeButton.Location.Y);
+        pnlActiveIndicator.Visible = true;
+        pnlActiveIndicator.BringToFront();
 
         pnlContent.Controls.Clear();
         pnlContent.Controls.Add(view);
+    }
+
+    private void ApplyTheme()
+    {
+        this.BackColor = ThemeColors.WindowBackground;
+        this.ForeColor = ThemeColors.TextPrimary;
+        
+        // Header & Sidebar
+        foreach (Control c in this.Controls) {
+            if (c is Panel p && p.Dock == DockStyle.Top) p.BackColor = ThemeColors.SidebarBackground;
+        }
+        
+        pnlSidebar.BackColor = ThemeColors.SidebarBackground;
+        pnlActiveIndicator.BackColor = ThemeColors.TextAccent;
+        pnlContent.BackColor = ThemeColors.PanelSurface;
+        pnlBottom.BackColor = ThemeColors.WindowBackground;
+        
+        ApplyThemeSidebar();
+        
+        lblStatus.ForeColor = ThemeColors.TextSecondary;
+        txtLogs.BackColor = ThemeColors.CurrentMode == ThemeMode.Dark ? Color.FromArgb(10, 10, 10) : Color.FromArgb(245, 245, 245);
+        txtLogs.ForeColor = ThemeColors.TextPrimary;
+
+        btnThemeToggle.Text = ThemeColors.CurrentMode == ThemeMode.Dark ? "🌙" : "☀️";
+    }
+
+    private void ApplyThemeSidebar()
+    {
+        foreach (Control ctrl in pnlSidebar.Controls) {
+            if (ctrl is ModernButton b) {
+                b.BackColor = ThemeColors.SidebarBackground;
+                b.ForeColor = ThemeColors.TextSecondary;
+            }
+        }
     }
 
     private void OpenExplorer(string path)

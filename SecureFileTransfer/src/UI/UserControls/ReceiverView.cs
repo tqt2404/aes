@@ -30,7 +30,7 @@ public class ReceiverView : UserControl
 
     private TextBox txtPort = default!, txtKey = default!;
     private Label lblFileName = default!;
-    private Button btnSelectEncFile = default!, btnReceiveNetwork = default!, btnDecryptOnly = default!;
+    private ModernButton btnSelectEncFile = default!, btnReceiveNetwork = default!, btnDecryptOnly = default!;
 
     public ReceiverView(FileTransferManager manager, AppConfig config)
     {
@@ -53,39 +53,73 @@ public class ReceiverView : UserControl
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         this.Controls.Add(layout);
 
-        var lblHeader = new Label { Text = "Hệ thống Nhận && Giải mã Dữ liệu", Font = ThemeColors.HeaderFont, ForeColor = ThemeColors.TextAccent, AutoSize = true, Margin = new Padding(0, 0, 0, 20) };
+        // Header
+        var lblHeader = new Label { 
+            Name = "lblHeader",
+            Text = "Hệ thống Nhận & Giải mã Dữ liệu", 
+            Font = ThemeColors.HeaderFont, 
+            ForeColor = ThemeColors.TextAccent, 
+            AutoSize = true, 
+            Margin = new Padding(0, 0, 0, 30) 
+        };
         layout.Controls.Add(lblHeader, 0, 0);
 
-        var pnlContent = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        ThemeColors.ThemeChanged += ApplyTheme;
+
+        // Content Panel
+        var pnlContent = new FlowLayoutPanel { 
+            Dock = DockStyle.Fill, 
+            AutoScroll = true, 
+            FlowDirection = FlowDirection.TopDown, 
+            WrapContents = false,
+            Padding = new Padding(0, 0, 20, 0)
+        };
         layout.Controls.Add(pnlContent, 0, 1);
 
-        // Network Reception First
-        pnlContent.Controls.Add(CreateGroupTitle("Cấu hình Trạm thu dữ liệu"));
+        // 1. Network Station Card
+        var cardNetwork = new ModernCard { Width = 750, Height = 180, Margin = new Padding(0, 0, 0, 20) };
+        cardNetwork.Controls.Add(CreateGroupTitle("CẤU HÌNH TRẠM THU DỮ LIỆU"));
         
-        txtPort = CreateInput("Cổng mạng lắng nghe (Port):", _config.DefaultPort.ToString(), pnlContent);
+        int startY = 60;
+        txtPort = CreateModernInput("Cổng mạng lắng nghe (Port):", _config.DefaultPort.ToString(), cardNetwork, ref startY);
         
-        btnReceiveNetwork = CreateButton("KÍCH HOẠT TRẠM THU", ThemeColors.Success, width: 350);
-        btnReceiveNetwork.Font = ThemeColors.TitleFont;
+        btnReceiveNetwork = CreateModernButton("KÍCH HOẠT TRẠM THU", ThemeColors.Success, 300, 45);
+        btnReceiveNetwork.Location = new Point(410, startY - 60); // Inline with port
         btnReceiveNetwork.Click += async (s, e) => await ReceiveNetworkActionAsync();
-        pnlContent.Controls.Add(btnReceiveNetwork);
+        cardNetwork.Controls.Add(btnReceiveNetwork);
+        pnlContent.Controls.Add(cardNetwork);
 
-        // Local Decryption Selection
-        pnlContent.Controls.Add(CreateGroupTitle("Giải mã tệp tin lưu trữ (.enc)"));
+        // 2. Storage Decryption Card
+        var cardDecrypt = new ModernCard { Width = 750, Height = 280, Margin = new Padding(0, 0, 0, 20) };
+        cardDecrypt.Controls.Add(CreateGroupTitle("GIẢI MÃ TỆP TIN LƯU TRỮ (.ENC)"));
         
-        var pnlFile = new FlowLayoutPanel { Width = 700, Height = 60, FlowDirection = FlowDirection.LeftToRight };
-        btnSelectEncFile = CreateButton("Duyệt tệp .enc...", ThemeColors.ButtonSecondary);
+        btnSelectEncFile = CreateModernButton("Duyệt tệp .enc...", ThemeColors.ButtonSecondary, 200, 45);
+        btnSelectEncFile.Location = new Point(20, 60);
         btnSelectEncFile.Click += SelectEncFileClick;
-        pnlFile.Controls.Add(btnSelectEncFile);
+        cardDecrypt.Controls.Add(btnSelectEncFile);
 
-        lblFileName = new Label { Text = "Chưa có file nào được chọn", ForeColor = ThemeColors.Warning, Font = new Font("Segoe UI", 10F, FontStyle.Italic), AutoSize = true, Margin = new Padding(15, 10, 0, 0) };
-        pnlFile.Controls.Add(lblFileName);
-        pnlContent.Controls.Add(pnlFile);
+        lblFileName = new Label { 
+            Text = "Chưa có file nào được chọn", 
+            ForeColor = ThemeColors.TextSecondary, 
+            Font = ThemeColors.TitleFont, 
+            AutoSize = true, 
+            Location = new Point(235, 72)
+        };
+        cardDecrypt.Controls.Add(lblFileName);
 
-        // Decrypt key
-        txtKey = CreateInput("Khóa bảo mật để giải mã (Key):", "", pnlContent, isPassword: true);
+        int keyY = 130;
+        txtKey = CreateModernInput("Khóa bảo mật để giải mã (Key):", "", cardDecrypt, ref keyY, isPassword: true);
+        pnlContent.Controls.Add(cardDecrypt);
 
-        var pnlActions = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 70, FlowDirection = FlowDirection.RightToLeft };
-        btnDecryptOnly = CreateButton("GIẢI MÃ DỮ LIỆU", ThemeColors.Primary, width: 250);
+        // Actions Bottom
+        var pnlActions = new FlowLayoutPanel { 
+            Dock = DockStyle.Bottom, 
+            Height = 80, 
+            FlowDirection = FlowDirection.RightToLeft,
+            Padding = new Padding(0, 15, 0, 0)
+        };
+        
+        btnDecryptOnly = CreateModernButton("GIẢI MÃ DỮ LIỆU", ThemeColors.Primary, 260, 50);
         btnDecryptOnly.Font = ThemeColors.TitleFont;
         btnDecryptOnly.Click += async (s, e) => await DecryptLocalActionAsync();
 
@@ -94,29 +128,51 @@ public class ReceiverView : UserControl
     }
 
     private Label CreateGroupTitle(string title) {
-        return new Label { Text = title.ToUpper(), ForeColor = ThemeColors.TextSecondary, Font = new Font("Segoe UI", 10F, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 20, 0, 10) };
+        return new Label { 
+            Text = title, 
+            ForeColor = ThemeColors.TextAccent, 
+            Font = ThemeColors.LabelFont, 
+            AutoSize = true, 
+            Location = new Point(20, 20) 
+        };
     }
 
-    private TextBox CreateInput(string labelText, string defaultValue, Control parent, bool isPassword = false) {
-        parent.Controls.Add(new Label { Text = labelText, AutoSize = true, Margin = new Padding(0, 0, 0, 5) });
+    private TextBox CreateModernInput(string labelText, string defaultValue, Control parent, ref int startY, bool isPassword = false) {
+        parent.Controls.Add(new Label { 
+            Text = labelText, 
+            ForeColor = ThemeColors.TextSecondary, 
+            Font = ThemeColors.BodyFont, 
+            AutoSize = true, 
+            Location = new Point(20, startY) 
+        });
+        
         var t = new TextBox { 
             Text = defaultValue, 
-            Width = 600,
+            Width = 350, // Slightly smaller for receiver port
             BackColor = ThemeColors.InputBackground, 
             ForeColor = ThemeColors.TextPrimary, 
             BorderStyle = BorderStyle.FixedSingle, 
             PasswordChar = isPassword ? '*' : '\0',
-            Margin = new Padding(0, 0, 0, 15),
-            Font = new Font("Segoe UI", 13F) 
+            Location = new Point(20, startY + 25),
+            Font = new Font("Segoe UI", 12F) 
         };
+        if (isPassword) t.Width = 710;
+        
         parent.Controls.Add(t);
+        startY += 85;
         return t;
     }
 
-    private Button CreateButton(string text, Color backColor, int width = 180) {
-        var btn = new Button { Text = text, Width = width, Height = 45, BackColor = backColor, ForeColor = Color.White, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(10, 0, 0, 0), Font = new Font("Segoe UI", 10F, FontStyle.Bold) };
-        btn.FlatAppearance.BorderSize = 0;
-        return btn;
+    private ModernButton CreateModernButton(string text, Color backColor, int width, int height) {
+        return new ModernButton { 
+            Text = text, 
+            Width = width, 
+            Height = height, 
+            BackColor = backColor, 
+            ForeColor = Color.White, 
+            Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+            Margin = new Padding(10, 0, 0, 0)
+        };
     }
 
     private void SelectEncFileClick(object? sender, EventArgs e) {
@@ -204,6 +260,41 @@ public class ReceiverView : UserControl
         btnSelectEncFile.Enabled = !isLoading;
         if (!isLoading && _receiveCts == null) {
             btnReceiveNetwork.Enabled = true;
+        }
+    }
+
+    private void ApplyTheme()
+    {
+        this.BackColor = ThemeColors.PanelSurface;
+        this.ForeColor = ThemeColors.TextPrimary;
+
+        foreach (Control c in this.Controls) {
+            if (c is TableLayoutPanel tlp) {
+                foreach (Control sub in tlp.Controls) {
+                    if (sub is Label lbl && lbl.Name == "lblHeader") lbl.ForeColor = ThemeColors.TextAccent;
+                    if (sub is FlowLayoutPanel flp) {
+                        foreach (Control item in flp.Controls) {
+                            if (item is ModernCard card) ApplyThemeToCard(card);
+                        }
+                    }
+                }
+            }
+        }
+        
+        lblFileName.ForeColor = (_selectedEncFile != "") ? ThemeColors.TextAccent : ThemeColors.TextSecondary;
+    }
+
+    private void ApplyThemeToCard(ModernCard card)
+    {
+        foreach (Control c in card.Controls) {
+            if (c is Label lbl) {
+                if (lbl.Font == ThemeColors.LabelFont) lbl.ForeColor = ThemeColors.TextAccent;
+                else lbl.ForeColor = ThemeColors.TextSecondary;
+            }
+            if (c is TextBox txt) {
+                txt.BackColor = ThemeColors.InputBackground;
+                txt.ForeColor = ThemeColors.TextPrimary;
+            }
         }
     }
 

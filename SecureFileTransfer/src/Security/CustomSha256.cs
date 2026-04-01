@@ -2,10 +2,6 @@ using System;
 
 namespace SecureFileTransfer.Security;
 
-/// <summary>
-/// Custom SHA256 implementation từ scratch (không dùng thư viện).
-/// FIPS 180-4 specification.
-/// </summary>
 public class CustomSha256
 {
     private static readonly uint[] k = {

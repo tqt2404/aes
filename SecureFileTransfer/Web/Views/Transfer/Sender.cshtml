@@ -1,0 +1,188 @@
+@{
+    ViewData["Title"] = "Trạm Gửi - Mã hóa & Gửi File";
+}
+
+<div class="row">
+    <div class="col-lg-8 mx-auto">
+        <div class="card card-custom">
+            <div class="card-header">
+                <h5><i class="bi bi-arrow-up-circle"></i> Mã hóa và Gửi File</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" action="@Url.Action("SendFile", "Transfer")" enctype="multipart/form-data" id="senderForm">
+                    <!-- Destination IP -->
+                    <div class="mb-3">
+                        <label for="destinationIp" class="form-label">
+                            <i class="bi bi-globe"></i> IP Đích
+                        </label>
+                        <input type="text" class="form-control" id="destinationIp" name="destinationIp"
+                               placeholder="Ví dụ: 192.168.1.100" required value="127.0.0.1">
+                        <small class="text-muted d-block mt-2">
+                            <i class="bi bi-info-circle"></i> Nhập IP của máy nhận file
+                        </small>
+                    </div>
+
+                    <!-- Port -->
+                    <div class="mb-3">
+                        <label for="port" class="form-label">
+                            <i class="bi bi-diagram-3"></i> Port
+                        </label>
+                        <input type="number" class="form-control" id="port" name="port"
+                               placeholder="Ví dụ: 8080" required value="8080" min="1" max="65535">
+                        <small class="text-muted d-block mt-2">
+                            <i class="bi bi-info-circle"></i> Nhập cổng lắng nghe của trạm nhận (1-65535)
+                        </small>
+                    </div>
+
+                    <!-- AES Key -->
+                    <div class="mb-3">
+                        <label for="aesKey" class="form-label">
+                            <i class="bi bi-key"></i> Khóa AES (Mật khẩu)
+                        </label>
+                        <input type="password" class="form-control" id="aesKey" name="aesKey"
+                               placeholder="Nhập mật khẩu mạnh (tối thiểu 8 ký tự)" required>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="togglePassword">
+                            <i class="bi bi-eye"></i> Hiển thị
+                        </button>
+                        <small class="text-muted d-block mt-2">
+                            <i class="bi bi-info-circle"></i> Mật khẩu phải giống với bên máy nhận
+                        </small>
+                    </div>
+
+                    <!-- File Upload -->
+                    <div class="mb-3">
+                        <label for="file" class="form-label">
+                            <i class="bi bi-file-earmark"></i> Chọn File
+                        </label>
+                        <div class="file-upload-wrapper">
+                            <input type="file" id="file" name="file" required>
+                            <label for="file" class="file-upload-label">
+                                <i class="bi bi-cloud-arrow-up"></i>
+                                <div>
+                                    <strong>Kéo file vào đây hoặc click để chọn</strong><br>
+                                    <small>Hỗ trợ tất cả format file</small>
+                                </div>
+                            </label>
+                        </div>
+                        <div id="fileInfo" class="mt-3" style="display: none;">
+                            <small class="text-success">
+                                <i class="bi bi-check-circle"></i>
+                                <strong>File được chọn:</strong> <span id="fileName"></span>
+                                (<span id="fileSize"></span>)
+                            </small>
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div class="mb-3">
+                        <button type="submit" class="btn btn-primary w-100" id="submitBtn">
+                            <i class="bi bi-lock-fill"></i> Mã hóa & Gửi File
+                        </button>
+                    </div>
+
+                    <!-- Progress Section -->
+                    <div class="progress-section" id="progressSection">
+                        <p><strong>Đang mã hóa và gửi...</strong></p>
+                        <div class="progress mb-2">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" id="progressBar"
+                                 role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"
+                                 style="width: 0%"></div>
+                        </div>
+                        <small class="text-muted" id="progressText">0%</small>
+                    </div>
+
+                    <!-- Info Box -->
+                    <div class="alert alert-info mt-4">
+                        <i class="bi bi-shield-check"></i>
+                        <strong>Bảo mật:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li>File sẽ được mã hóa bằng AES-256 CBC</li>
+                            <li>Được bảo vệ bằng HMAC-SHA256 chống giả mạo</li>
+                            <li>Mật khẩu được hash bằng PBKDF2 (600,000 iterations)</li>
+                        </ul>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // File upload handling
+    const fileInput = document.getElementById('file');
+    const fileLabel = document.querySelector('.file-upload-label');
+    const fileInfo = document.getElementById('fileInfo');
+    const fileName = document.getElementById('fileName');
+    const fileSize = document.getElementById('fileSize');
+
+    fileInput.addEventListener('change', function(e) {
+        if (this.files && this.files[0]) {
+            const file = this.files[0];
+            fileName.textContent = file.name;
+            fileSize.textContent = formatBytes(file.size);
+            fileInfo.style.display = 'block';
+        }
+    });
+
+    // Drag and drop
+    fileLabel.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        fileLabel.style.backgroundColor = '#e6f2ff';
+        fileLabel.style.borderColor = '#2980b9';
+    });
+
+    fileLabel.addEventListener('dragleave', () => {
+        fileLabel.style.backgroundColor = '#f0f7ff';
+        fileLabel.style.borderColor = '#3498db';
+    });
+
+    fileLabel.addEventListener('drop', (e) => {
+        e.preventDefault();
+        fileLabel.style.backgroundColor = '#f0f7ff';
+        fileLabel.style.borderColor = '#3498db';
+
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            fileInput.files = e.dataTransfer.files;
+            const customEvent = new Event('change', { bubbles: true });
+            fileInput.dispatchEvent(customEvent);
+        }
+    });
+
+    // Toggle password visibility
+    document.getElementById('togglePassword').addEventListener('click', function() {
+        const input = document.getElementById('aesKey');
+        const icon = this.querySelector('i');
+
+        if (input.type === 'password') {
+            input.type = 'text';
+            icon.classList.remove('bi-eye');
+            icon.classList.add('bi-eye-slash');
+            this.textContent = '';
+            this.appendChild(document.createElement('i')).className = 'bi bi-eye-slash';
+            this.appendChild(document.createTextNode(' Ẩn'));
+        } else {
+            input.type = 'password';
+            icon.classList.remove('bi-eye-slash');
+            icon.classList.add('bi-eye');
+            this.textContent = '';
+            this.appendChild(document.createElement('i')).className = 'bi bi-eye';
+            this.appendChild(document.createTextNode(' Hiển thị'));
+        }
+    });
+
+    // Format bytes
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    }
+
+    // Form submission
+    document.getElementById('senderForm').addEventListener('submit', function(e) {
+        const btn = document.getElementById('submitBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Đang xử lý...';
+    });
+</script>

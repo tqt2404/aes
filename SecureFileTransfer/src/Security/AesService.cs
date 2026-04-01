@@ -3,6 +3,9 @@ using SecureFileTransfer.Models;
 
 namespace SecureFileTransfer.Security;
 
+// Disable usage of .NET built-in Aes - using custom implementation only
+#pragma warning disable SYSLIB0011
+
 public interface IAesCryptography
 {
     void EncryptFile(string inputFile, string outputFile, string password);
@@ -22,88 +25,119 @@ public class AesService : IAesCryptography
 
     public async Task EncryptStreamAsync(Stream input, Stream output, string password, CancellationToken ct = default)
     {
-        byte[] salt = RandomNumberGenerator.GetBytes(SALT_SIZE);
+        // 1. Generate salt (random)
+        var customRandom = new CustomRandom();
+        byte[] salt = customRandom.GetBytes(SALT_SIZE);
+        byte[] iv = customRandom.GetBytes(IV_SIZE);
+        
+        // 2. Derive encryption keys từ password (custom PBKDF2)
         var (aesKey, hmacKey) = DeriveKeys(password, salt);
 
-        using Aes aes = CreateAesInstance(aesKey);
-        using var hmacAlgo = new HMACSHA256(hmacKey);
+        // 3. Tạo custom AES và CBC mode
+        var customAes = new CustomAes256(aesKey);
+        var cbcMode = new CustomCbcMode(customAes, iv);
 
-        // 1. Write Header (Salt + IV)
+        // 4. Write header (Salt + IV)
         byte[] header = new byte[SALT_SIZE + IV_SIZE];
         Buffer.BlockCopy(salt, 0, header, 0, SALT_SIZE);
-        Buffer.BlockCopy(aes.IV, 0, header, SALT_SIZE, IV_SIZE);
+        Buffer.BlockCopy(iv, 0, header, SALT_SIZE, IV_SIZE);
         
         await output.WriteAsync(header, 0, header.Length, ct);
-        hmacAlgo.TransformBlock(header, 0, header.Length, null, 0);
 
-        // 2. Encryption with CryptoStream and HMAC update
-        using (ICryptoTransform encryptor = aes.CreateEncryptor())
-        using (CryptoStream cs = new CryptoStream(input, encryptor, CryptoStreamMode.Read, true))
+        // 5. HMAC để verify integrity (custom HMAC-SHA256)
+        var hmacAlgo = new CustomHmacSha256(hmacKey);
+        byte[] headerHmac = hmacAlgo.ComputeHash(header);
+
+        // 6. Encrypt toàn bộ file bằng CBC mode
+        byte[] buffer = new byte[BUFFER_SIZE];
+        int read;
+        
+        // Accumulate plaintext blocks
+        List<byte> plaintextBlocks = new();
+
+        while ((read = await input.ReadAsync(buffer, 0, buffer.Length, ct)) > 0)
         {
-            byte[] buffer = new byte[BUFFER_SIZE];
-            int read;
-            while ((read = await cs.ReadAsync(buffer, 0, buffer.Length, ct)) > 0)
-            {
-                await output.WriteAsync(buffer, 0, read, ct);
-                hmacAlgo.TransformBlock(buffer, 0, read, null, 0);
-            }
+            plaintextBlocks.AddRange(buffer.Take(read));
         }
 
-        // 3. Finalize and Write HMAC
-        hmacAlgo.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
-        await output.WriteAsync(hmacAlgo.Hash!, 0, HMAC_SIZE, ct);
+        if (plaintextBlocks.Count > 0)
+        {
+            // Encrypt tất cả dữ liệu cùng lúc với CBC mode
+            byte[] allPlaintext = plaintextBlocks.ToArray();
+            byte[] allCiphertext = cbcMode.Encrypt(allPlaintext);
+            
+            // Write ciphertext
+            await output.WriteAsync(allCiphertext, 0, allCiphertext.Length, ct);
+
+            // Compute HMAC over header + ciphertext
+            byte[] fullData = new byte[header.Length + allCiphertext.Length];
+            Array.Copy(header, fullData, header.Length);
+            Array.Copy(allCiphertext, 0, fullData, header.Length, allCiphertext.Length);
+            
+            byte[] finalHmac = hmacAlgo.ComputeHash(fullData);
+            await output.WriteAsync(finalHmac, 0, HMAC_SIZE, ct);
+        }
     }
 
     public async Task DecryptStreamAsync(Stream input, Stream output, string password, CancellationToken ct = default)
     {
-        if (!input.CanSeek) throw new NotSupportedException("DecryptStreamAsync requires seekable input for MAC verification.");
+        if (!input.CanSeek) 
+            throw new NotSupportedException("DecryptStreamAsync cần seekable input để verify HMAC");
 
         long totalLength = input.Length;
         if (totalLength < SALT_SIZE + IV_SIZE + HMAC_SIZE) 
-            throw new CryptographicException("File format invalid.");
+            throw new CryptographicException("File format không hợp lệ");
 
-        // 1. Verify HMAC
+        // 1. Đọc HMAC từ cuối file
         input.Seek(-HMAC_SIZE, SeekOrigin.End);
         byte[] hmacReceived = new byte[HMAC_SIZE];
         await input.ReadExactlyAsync(hmacReceived, 0, HMAC_SIZE, ct);
 
+        // 2. Đọc header (salt + IV)
         input.Seek(0, SeekOrigin.Begin);
         byte[] header = new byte[SALT_SIZE + IV_SIZE];
         await input.ReadExactlyAsync(header, 0, header.Length, ct);
+        
         byte[] salt = new byte[SALT_SIZE];
         byte[] iv = new byte[IV_SIZE];
         Buffer.BlockCopy(header, 0, salt, 0, SALT_SIZE);
         Buffer.BlockCopy(header, SALT_SIZE, iv, 0, IV_SIZE);
 
+        // 3. Derive keys (custom PBKDF2)
         var (aesKey, hmacKey) = DeriveKeys(password, salt);
-        
-        input.Seek(0, SeekOrigin.Begin);
-        using (var hmacAlgo = new HMACSHA256(hmacKey))
-        {
-            byte[] verifBuf = new byte[BUFFER_SIZE];
-            long toVerify = totalLength - HMAC_SIZE;
-            while (toVerify > 0)
-            {
-                int read = await input.ReadAsync(verifBuf, 0, (int)Math.Min(verifBuf.Length, toVerify), ct);
-                if (read == 0) break;
-                hmacAlgo.TransformBlock(verifBuf, 0, read, null, 0);
-                toVerify -= read;
-            }
-            hmacAlgo.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
-            if (!CryptographicOperations.FixedTimeEquals(hmacAlgo.Hash!, hmacReceived))
-                throw new CryptographicException("Lỗi bảo mật: Khóa không chính xác hoặc dữ liệu đã bị thay đổi.");
-        }
 
-        // Thực hiện giải mã
-        input.Seek(SALT_SIZE + IV_SIZE, SeekOrigin.Begin);
-        using Aes aes = CreateAesInstance(aesKey, iv);
-        using ICryptoTransform decryptor = aes.CreateDecryptor();
+        // 4. Verify HMAC (custom HMAC-SHA256)
+        input.Seek(0, SeekOrigin.Begin);
+        long encryptedDataLen = totalLength - HMAC_SIZE;
+        byte[] allData = new byte[encryptedDataLen];
+        await input.ReadExactlyAsync(allData, 0, (int)encryptedDataLen, ct);
         
-        using (var limitedStream = new LimitedStream(input, totalLength - HMAC_SIZE - (SALT_SIZE + IV_SIZE)))
-        using (CryptoStream cs = new CryptoStream(limitedStream, decryptor, CryptoStreamMode.Read, true))
-        {
-            await cs.CopyToAsync(output, ct);
-        }
+        var hmacAlgo = new CustomHmacSha256(hmacKey);
+        byte[] hmacComputed = hmacAlgo.ComputeHash(allData);
+        
+        if (!ConstantTimeEquals(hmacComputed, hmacReceived))
+            throw new CryptographicException("Lỗi bảo mật: Khóa không chính xác hoặc dữ liệu bị thay đổi");
+
+        // 5. Extract ciphertext (skip header)
+        byte[] ciphertext = new byte[encryptedDataLen - (SALT_SIZE + IV_SIZE)];
+        Array.Copy(allData, SALT_SIZE + IV_SIZE, ciphertext, 0, ciphertext.Length);
+
+        // 6. Decrypt sử dụng custom AES + CBC mode
+        var customAes = new CustomAes256(aesKey);
+        var cbcMode = new CustomCbcMode(customAes, iv);
+        byte[] plaintext = cbcMode.Decrypt(ciphertext);
+
+        // 7. Write decrypted data
+        await output.WriteAsync(plaintext, 0, plaintext.Length, ct);
+    }
+
+    private bool ConstantTimeEquals(byte[] a, byte[] b)
+    {
+        if (a.Length != b.Length) return false;
+        int result = 0;
+        for (int i = 0; i < a.Length; i++)
+            result |= a[i] ^ b[i];
+        return result == 0;
     }
 
     public void EncryptFile(string inputFile, string outputFile, string password)
@@ -124,71 +158,17 @@ public class AesService : IAesCryptography
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(password);
         ArgumentNullException.ThrowIfNull(salt);
-        if (salt.Length != SALT_SIZE) throw new ArgumentException($"Salt size must be {SALT_SIZE} bytes.", nameof(salt));
+        if (salt.Length != SALT_SIZE) 
+            throw new ArgumentException($"Salt phải là {SALT_SIZE} bytes", nameof(salt));
 
-        using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, ITERATIONS, HashAlgorithmName.SHA256);
-        return (pbkdf2.GetBytes(32), pbkdf2.GetBytes(32));
-    }
-
-    private Aes CreateAesInstance(byte[] key, byte[]? iv = null)
-    {
-        ArgumentNullException.ThrowIfNull(key);
-        if (key.Length != 32) throw new ArgumentException("Key size must be 256-bit (32 bytes).", nameof(key));
-
-        Aes aes = Aes.Create();
-        aes.KeySize = 256;
-        aes.Key = key;
+        // Sử dụng custom PBKDF2
+        byte[] derivedBytes = CustomPbkdf2.DeriveKey(password, salt, ITERATIONS, 64);
         
-        if (iv != null) 
-        {
-            if (iv.Length != IV_SIZE) throw new ArgumentException($"IV size must be {IV_SIZE} bytes.", nameof(iv));
-            aes.IV = iv; 
-        } 
-        else 
-        {
-            aes.GenerateIV();
-        }
-
-        aes.Mode = CipherMode.CBC;
-        aes.Padding = PaddingMode.PKCS7;
-        return aes;
+        byte[] aesKey = new byte[32];
+        byte[] hmacKey = new byte[32];
+        Buffer.BlockCopy(derivedBytes, 0, aesKey, 0, 32);
+        Buffer.BlockCopy(derivedBytes, 32, hmacKey, 0, 32);
+        
+        return (aesKey, hmacKey);
     }
-}
-
-// Helper class to limit stream reading for CryptoStream
-internal class LimitedStream : Stream
-{
-    private readonly Stream _inner;
-    private long _left;
-    public LimitedStream(Stream inner, long length) { _inner = inner; _left = length; }
-    public override bool CanRead => true;
-    public override bool CanSeek => false;
-    public override bool CanWrite => false;
-    public override long Length => _left;
-    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
-    public override void Flush() { }
-    public override int Read(byte[] buffer, int offset, int count)
-    {
-        if (_left <= 0) return 0;
-        int read = _inner.Read(buffer, offset, (int)Math.Min(count, _left));
-        _left -= read;
-        return read;
-    }
-    public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
-    {
-        if (_left <= 0) return 0;
-        int read = await _inner.ReadAsync(buffer, offset, (int)Math.Min(count, _left), ct);
-        _left -= read;
-        return read;
-    }
-    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
-    {
-        if (_left <= 0) return 0;
-        int read = await _inner.ReadAsync(buffer.Slice(0, (int)Math.Min(buffer.Length, _left)), ct);
-        _left -= read;
-        return read;
-    }
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-    public override void SetLength(long value) => throw new NotSupportedException();
-    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 }

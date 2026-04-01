@@ -1,0 +1,30 @@
+@{
+    ViewData["Title"] = "Lỗi";
+}
+
+@model ErrorViewModel
+
+<div class="row">
+    <div class="col-lg-6 mx-auto">
+        <div class="alert alert-danger" role="alert">
+            <h4 class="alert-heading">
+                <i class="bi bi-exclamation-triangle-fill"></i> Đã Xảy Ra Lỗi
+            </h4>
+            <p>Xin lỗi, đã có lỗi không mong muốn. Vui lòng thử lại sau hoặc liên hệ với quản trị viên.</p>
+
+            @if (Model.ShowRequestId)
+            {
+                <hr>
+                <small>
+                    <strong>Request ID:</strong> <code>@Model.RequestId</code>
+                </small>
+            }
+        </div>
+
+        <div class="text-center mt-4">
+            <a href="@Url.Action("Index", "Transfer")" class="btn btn-primary">
+                <i class="bi bi-house"></i> Quay Về Trang Chủ
+            </a>
+        </div>
+    </div>
+</div>

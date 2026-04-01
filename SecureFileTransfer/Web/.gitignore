@@ -1,0 +1,48 @@
+# Build results
+bin/
+obj/
+dist/
+
+# Visual Studio cache/options
+.vs/
+.vscode/
+
+# IDE
+*.user
+*.suo
+*.sln.docstates
+
+# NuGet
+packages/
+*.nupkg
+*.snupkg
+
+# Environment variables
+*.local
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Published web
+publish/
+PublishProfiles/
+
+# Database files
+*.mdf
+*.ldf
+*.db
+
+# User-specific
+appsettings.*.json
+!appsettings.Development.json

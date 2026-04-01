@@ -1,0 +1,233 @@
+@{
+    ViewData["Title"] = "Trạm Nhận - Nhận & Giải mã File";
+}
+
+<div class="row">
+    <!-- Receiver Section -->
+    <div class="col-lg-6 mb-4">
+        <div class="card card-custom">
+            <div class="card-header">
+                <h5><i class="bi bi-arrow-down-circle"></i> Bật Lắng Nghe</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" action="@Url.Action("StartReceiver", "Transfer")" id="receiverForm">
+                    <!-- Port -->
+                    <div class="mb-3">
+                        <label for="port" class="form-label">
+                            <i class="bi bi-diagram-3"></i> Port Lắng Nghe
+                        </label>
+                        <input type="number" class="form-control" id="port" name="port"
+                               placeholder="Ví dụ: 8080" required value="8080" min="1" max="65535">
+                        <small class="text-muted d-block mt-2">
+                            <i class="bi bi-info-circle"></i> Port phải giống với port trạm gửi
+                        </small>
+                    </div>
+
+                    <!-- AES Key -->
+                    <div class="mb-3">
+                        <label for="aesKey" class="form-label">
+                            <i class="bi bi-key"></i> Khóa AES (Mật khẩu)
+                        </label>
+                        <input type="password" class="form-control" id="aesKey" name="aesKey"
+                               placeholder="Nhập mật khẩu (phải giống trạm gửi)" required>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="togglePassword">
+                            <i class="bi bi-eye"></i> Hiển thị
+                        </button>
+                        <small class="text-muted d-block mt-2">
+                            <i class="bi bi-info-circle"></i> Mật khẩu phải giống với bên máy gửi
+                        </small>
+                    </div>
+
+                    <!-- Start Button -->
+                    <div class="mb-3">
+                        <button type="submit" class="btn btn-success w-100" id="submitBtn">
+                            <i class="bi bi-play-fill"></i> Bật Trạm Thu
+                        </button>
+                    </div>
+
+                    <!-- Progress Section -->
+                    <div class="progress-section" id="progressSection">
+                        <p><strong>Đang chờ file...</strong></p>
+                        <div class="spinner-border text-success" role="status">
+                            <span class="visually-hidden">Đang chờ...</span>
+                        </div>
+                        <small class="text-muted d-block mt-2">
+                            Lắng nghe trên port <strong id="portInfo">8080</strong>. Vui lòng không đóng trang này.
+                        </small>
+                    </div>
+
+                    <!-- Info Box -->
+                    <div class="alert alert-info mt-4">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>Hướng dẫn:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li>Nhập Port và Mật khẩu giống như bên trạm gửi</li>
+                            <li>Nhấn "Bật Trạm Thu" để bắt đầu lắng nghe</li>
+                            <li>File sẽ được tự động giải mã khi nhận được</li>
+                            <li>Timeout: 30 phút nếu không có dữ liệu</li>
+                        </ul>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Decrypt Local File Section -->
+    <div class="col-lg-6 mb-4">
+        <div class="card card-custom">
+            <div class="card-header">
+                <h5><i class="bi bi-unlock"></i> Giải Mã File Cục Bộ</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" action="@Url.Action("DecryptFile", "Transfer")" enctype="multipart/form-data" id="decryptForm">
+                    <!-- File Upload -->
+                    <div class="mb-3">
+                        <label for="file" class="form-label">
+                            <i class="bi bi-file-earmark"></i> Chọn File .enc
+                        </label>
+                        <div class="file-upload-wrapper">
+                            <input type="file" id="file" name="file" accept=".enc" required>
+                            <label for="file" class="file-upload-label">
+                                <i class="bi bi-cloud-arrow-up"></i>
+                                <div>
+                                    <strong>Kéo file .enc vào đây hoặc click</strong><br>
+                                    <small>File được mã hóa (*.enc)</small>
+                                </div>
+                            </label>
+                        </div>
+                        <div id="fileInfo" class="mt-3" style="display: none;">
+                            <small class="text-success">
+                                <i class="bi bi-check-circle"></i>
+                                <strong>File được chọn:</strong> <span id="fileName"></span>
+                                (<span id="fileSize"></span>)
+                            </small>
+                        </div>
+                    </div>
+
+                    <!-- AES Key for Decrypt -->
+                    <div class="mb-3">
+                        <label for="aesKeyDecrypt" class="form-label">
+                            <i class="bi bi-key"></i> Khóa AES (Mật khẩu)
+                        </label>
+                        <input type="password" class="form-control" id="aesKeyDecrypt" name="aesKey"
+                               placeholder="Nhập mật khẩu" required>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="togglePasswordDecrypt">
+                            <i class="bi bi-eye"></i> Hiển thị
+                        </button>
+                    </div>
+
+                    <!-- Decrypt Button -->
+                    <div class="mb-3">
+                        <button type="submit" class="btn btn-primary w-100" id="submitBtnDecrypt">
+                            <i class="bi bi-lock-fill"></i> Giải Mã & Tải Về
+                        </button>
+                    </div>
+
+                    <!-- Info Box -->
+                    <div class="alert alert-info mt-4">
+                        <i class="bi bi-shield-check"></i>
+                        <strong>Cách sử dụng:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li>Chọn file .enc cần giải mã</li>
+                            <li>Nhập đúng mật khẩu đã dùng lúc mã hóa</li>
+                            <li>Nhấn "Giải Mã & Tải Về" để tải file gốc</li>
+                        </ul>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // File upload for receiver
+    const fileInputReceiver = document.getElementById('file');
+    const fileLabel = document.querySelector('.file-upload-label');
+    const fileInfo = document.getElementById('fileInfo');
+    const fileName = document.getElementById('fileName');
+    const fileSize = document.getElementById('fileSize');
+
+    fileInputReceiver.addEventListener('change', function(e) {
+        if (this.files && this.files[0]) {
+            const file = this.files[0];
+            fileName.textContent = file.name;
+            fileSize.textContent = formatBytes(file.size);
+            fileInfo.style.display = 'block';
+        }
+    });
+
+    // Drag and drop
+    fileLabel.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        fileLabel.style.backgroundColor = '#e6f2ff';
+        fileLabel.style.borderColor = '#2980b9';
+    });
+
+    fileLabel.addEventListener('dragleave', () => {
+        fileLabel.style.backgroundColor = '#f0f7ff';
+        fileLabel.style.borderColor = '#3498db';
+    });
+
+    fileLabel.addEventListener('drop', (e) => {
+        e.preventDefault();
+        fileLabel.style.backgroundColor = '#f0f7ff';
+        fileLabel.style.borderColor = '#3498db';
+
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            fileInputReceiver.files = e.dataTransfer.files;
+            const customEvent = new Event('change', { bubbles: true });
+            fileInputReceiver.dispatchEvent(customEvent);
+        }
+    });
+
+    // Toggle password visibility - Receiver
+    document.getElementById('togglePassword').addEventListener('click', function() {
+        const input = document.getElementById('aesKey');
+        togglePasswordField(input, this);
+    });
+
+    // Toggle password visibility - Decrypt
+    document.getElementById('togglePasswordDecrypt').addEventListener('click', function() {
+        const input = document.getElementById('aesKeyDecrypt');
+        togglePasswordField(input, this);
+    });
+
+    function togglePasswordField(input, button) {
+        if (input.type === 'password') {
+            input.type = 'text';
+            button.innerHTML = '<i class="bi bi-eye-slash"></i> Ẩn';
+        } else {
+            input.type = 'password';
+            button.innerHTML = '<i class="bi bi-eye"></i> Hiển thị';
+        }
+    }
+
+    // Format bytes
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    }
+
+    // Update port info when changed
+    document.getElementById('port').addEventListener('change', function() {
+        document.getElementById('portInfo').textContent = this.value;
+    });
+
+    // Form submission handling
+    document.getElementById('receiverForm').addEventListener('submit', function(e) {
+        const btn = document.getElementById('submitBtn');
+        const progressSection = document.getElementById('progressSection');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Đang bật lắng nghe...';
+        progressSection.classList.add('active');
+    });
+
+    document.getElementById('decryptForm').addEventListener('submit', function(e) {
+        const btn = document.getElementById('submitBtnDecrypt');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Đang giải mã...';
+    });
+</script>

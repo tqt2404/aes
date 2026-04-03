@@ -4,7 +4,7 @@ namespace SecureFileTransfer.Security;
 /// CBC (Cipher Block Chaining) Mode implementation.
 /// Chains block encryption/decryption operations using initialization vector (IV).
 /// 
-/// This class works in conjunction with Aes256Impl (fully custom AES from scratch)
+/// This class works in conjunction with Aes256CoreImpl (fully custom AES from scratch - FIPS 197)
 /// to provide complete file encryption with proper IV chaining and state management for streaming.
 /// 
 /// Note: Padding is handled at the service level (AesCryptographyService).
@@ -12,16 +12,16 @@ namespace SecureFileTransfer.Security;
 /// </summary>
 public class CbcModeOperations
 {
-    private readonly Aes256Impl aes;
+    private readonly Aes256CoreImpl aes;
     private byte[] lastCipherBlock;  // Maintain state for chaining
     private const int BLOCK_SIZE = 16;
 
     /// <summary>
     /// Initialize CBC mode with an AES cipher and initialization vector.
     /// </summary>
-    /// <param name="aesInstance">AES cipher instance (Aes256Impl - custom AES from scratch)</param>
+    /// <param name="aesInstance">AES cipher instance (Aes256CoreImpl - custom AES from scratch - FIPS 197)</param>
     /// <param name="initialVector">16-byte initialization vector</param>
-    public CbcModeOperations(Aes256Impl aesInstance, byte[] initialVector)
+    public CbcModeOperations(Aes256CoreImpl aesInstance, byte[] initialVector)
     {
         ArgumentNullException.ThrowIfNull(aesInstance);
         ArgumentNullException.ThrowIfNull(initialVector);
@@ -59,7 +59,7 @@ public class CbcModeOperations
             for (int i = 0; i < BLOCK_SIZE; i++)
                 xorBlock[i] = (byte)(plaintext[block + i] ^ previousCipherBlock[i]);
 
-            // Encrypt block using custom Aes256Impl
+            // Encrypt block using custom Aes256CoreImpl (FIPS 197)
             byte[] encryptedBlock = new byte[BLOCK_SIZE];
             aes.EncryptBlock(xorBlock, 0, encryptedBlock, 0);
 
@@ -93,7 +93,7 @@ public class CbcModeOperations
 
         for (int block = 0; block < ciphertext.Length; block += BLOCK_SIZE)
         {
-            // Decrypt block using custom Aes256Impl
+            // Decrypt block using custom Aes256CoreImpl (FIPS 197)
             byte[] decryptedBlock = new byte[BLOCK_SIZE];
             aes.DecryptBlock(ciphertext, block, decryptedBlock, 0);
 

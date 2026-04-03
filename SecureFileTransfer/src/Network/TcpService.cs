@@ -60,7 +60,7 @@ public class TcpSender : ITcpClient
 
         // 1. Send Encrypted Metadata (Security: Prevents metadata plaintext leakage)
         byte[] metaBytes = metadata.Serialize();
-        byte[] encryptedMeta = EncryptMetadata(metaBytes, $"{ip}:{port}");
+        byte[] encryptedMeta = EncryptMetadata(metaBytes);
         await ns.WriteAsync(BitConverter.GetBytes(encryptedMeta.Length), 0, 4, ct);
         await ns.WriteAsync(encryptedMeta, 0, encryptedMeta.Length, ct);
 
@@ -70,18 +70,20 @@ public class TcpSender : ITcpClient
     }
 
     /// <summary>
-    /// Encrypt metadata using a deterministic key derived from connection parameters.
-    /// This prevents metadata plaintext leakage over the network.
-    /// Uses simple AES ECB mode with a fixed IV (metadata only, not full file security).
+    /// Encrypt metadata using a static pre-shared key.
+    /// This prevents metadata plaintext leakage over the network (Wireshark, etc).
+    /// Uses simple AES ECB mode (metadata only, not full file security).
+    /// Static PSK ensures both sender and receiver can encrypt/decrypt without IP coordination.
     /// </summary>
-    private byte[] EncryptMetadata(byte[] metaBytes, string connectionKey)
+    private byte[] EncryptMetadata(byte[] metaBytes)
     {
         try
         {
-            using var hmac = new System.Security.Cryptography.HMACSHA256(
-                Encoding.UTF8.GetBytes($"meta_key_{connectionKey}"));
+            // Static Pre-Shared Key for metadata transport layer encryption
+            const string METADATA_PSK = "SecureApp_Internal_MetaKey_2024!";
             byte[] key = new byte[32];
-            Array.Copy(hmac.ComputeHash(Encoding.UTF8.GetBytes(connectionKey)), key, 32);
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            Array.Copy(sha.ComputeHash(Encoding.UTF8.GetBytes(METADATA_PSK)), key, 32);
 
             // Pad metadata to AES block size (16 bytes)
             byte[] padded = PadToBlockSize(metaBytes);
@@ -204,10 +206,10 @@ public class TcpReceiver : ITcpServer
             byte[] encryptedMetaBytes = new byte[metaLen];
             await ns.ReadExactlyAsync(encryptedMetaBytes, 0, metaLen, ct);
             
-            // Decrypt metadata
-            byte[] metaBytes = DecryptMetadata(encryptedMetaBytes, $"{clientIp}:{port}");
+            // Decrypt metadata (using static PSK - same on both sides)
+            byte[] metaBytes = DecryptMetadata(encryptedMetaBytes);
             var metadata = FileMetadata.Deserialize(metaBytes) 
-                ?? throw new Exception("Lỗi định dạng Metadata sau giải mã.");
+                ?? throw new Exception("Lỗi định dạng Metadata sau giải mã hoặc metadata bị hỏng.");
 
             Logger.Log($"[Nhận] Metadata: {metadata.FileName}, KeySize: {metadata.KeySize} bits, FileSize: {metadata.FileSize} bytes");
 
@@ -222,17 +224,18 @@ public class TcpReceiver : ITcpServer
     }
 
     /// <summary>
-    /// Decrypt metadata using matching key derivation from connection parameters.
-    /// Pairs with EncryptMetadata on sender side.
+    /// Decrypt metadata using matching static pre-shared key.
+    /// Pairs with EncryptMetadata on sender side - PSK ensures both sides can decrypt.
     /// </summary>
-    private byte[] DecryptMetadata(byte[] encryptedBytes, string connectionKey)
+    private byte[] DecryptMetadata(byte[] encryptedBytes)
     {
         try
         {
-            using var hmac = new System.Security.Cryptography.HMACSHA256(
-                Encoding.UTF8.GetBytes($"meta_key_{connectionKey}"));
+            // Static Pre-Shared Key for metadata transport layer encryption (MUST match EncryptMetadata)
+            const string METADATA_PSK = "SecureApp_Internal_MetaKey_2024!";
             byte[] key = new byte[32];
-            Array.Copy(hmac.ComputeHash(Encoding.UTF8.GetBytes(connectionKey)), key, 32);
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            Array.Copy(sha.ComputeHash(Encoding.UTF8.GetBytes(METADATA_PSK)), key, 32);
 
             byte[] decrypted = new byte[encryptedBytes.Length];
             using var aes = System.Security.Cryptography.Aes.Create();

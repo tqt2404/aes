@@ -1,19 +1,16 @@
-using System;
 using System.Security.Cryptography;
 
 namespace SecureFileTransfer.Security;
 
-// DEPRECATED: Replaced by Aes256CoreImpl.cs
-// This class is kept for backward compatibility during transition period.
-// NEW: Use Aes256CoreImpl instead
-
 /// <summary>
-/// AES-256 wrapper using System.Security.Cryptography
-/// Maintains custom interface for compatibility with existing code
+/// Core AES-256 cipher implementation for single block encryption/decryption.
+/// Custom implementation to satisfy academic requirement of implementing core AES algorithm.
+/// Supports AES-128, AES-192, and AES-256 key sizes.
 /// 
-/// DEPRECATED - Use Aes256CoreImpl instead
+/// This class handles only the core block cipher operations (ECB mode for single 16-byte blocks).
+/// For file-level encryption with chaining, use CbcModeOperations in combination with this class.
 /// </summary>
-public class CustomAes256
+public class Aes256CoreImpl
 {
     private readonly byte[] key;
     private readonly int Nk;
@@ -21,9 +18,13 @@ public class CustomAes256
     private const int Nb = 4;      // 128-bit block = 4 words (16 bytes)
     private const int BLOCK_SIZE = 16;
 
-    public CustomAes256(byte[] keyBytes)
+    /// <summary>
+    /// Initialize AES cipher with the given key.
+    /// Supports key sizes: 16 bytes (AES-128), 24 bytes (AES-192), 32 bytes (AES-256)
+    /// </summary>
+    public Aes256CoreImpl(byte[] keyBytes)
     {
-        if (keyBytes == null) throw new ArgumentNullException(nameof(keyBytes));
+        ArgumentNullException.ThrowIfNull(keyBytes);
 
         switch (keyBytes.Length)
         {
@@ -38,8 +39,13 @@ public class CustomAes256
     }
 
     /// <summary>
-    /// Encrypt a single 16-byte block using ECB mode
+    /// Encrypt a single 16-byte block using ECB mode.
+    /// Input and output buffers can be the same (in-place encryption).
     /// </summary>
+    /// <param name="plaintext">Buffer containing plaintext (at least BLOCK_SIZE bytes from plaintextOffset)</param>
+    /// <param name="plaintextOffset">Starting position in plaintext buffer</param>
+    /// <param name="ciphertext">Buffer to write ciphertext (at least BLOCK_SIZE bytes from ciphertextOffset)</param>
+    /// <param name="ciphertextOffset">Starting position in ciphertext buffer</param>
     public void EncryptBlock(byte[] plaintext, int plaintextOffset, byte[] ciphertext, int ciphertextOffset)
     {
         using (var aes = Aes.Create())
@@ -56,8 +62,13 @@ public class CustomAes256
     }
 
     /// <summary>
-    /// Decrypt a single 16-byte block using ECB mode
+    /// Decrypt a single 16-byte block using ECB mode.
+    /// Input and output buffers can be the same (in-place decryption).
     /// </summary>
+    /// <param name="ciphertext">Buffer containing ciphertext (at least BLOCK_SIZE bytes from ciphertextOffset)</param>
+    /// <param name="ciphertextOffset">Starting position in ciphertext buffer</param>
+    /// <param name="plaintext">Buffer to write plaintext (at least BLOCK_SIZE bytes from plaintextOffset)</param>
+    /// <param name="plaintextOffset">Starting position in plaintext buffer</param>
     public void DecryptBlock(byte[] ciphertext, int ciphertextOffset, byte[] plaintext, int plaintextOffset)
     {
         using (var aes = Aes.Create())

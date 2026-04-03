@@ -25,6 +25,7 @@ public class SenderView : UserControl
 
     // Controls
     private TextBox txtIp = default!, txtPort = default!, txtKey = default!;
+    private ComboBox cmbAesSize = default!;
     private Label lblFileName = default!;
     private ModernButton btnSelectFile = default!, btnSend = default!, btnEncryptOnly = default!;
 
@@ -104,7 +105,38 @@ public class SenderView : UserControl
         int startY = 60;
         txtIp = CreateModernInput("Địa chỉ IP (Máy nhận):", _config.DefaultIp, cardNetwork, ref startY);
         txtPort = CreateModernInput("Cổng dịch vụ (Port):", _config.DefaultPort.ToString(), cardNetwork, ref startY);
-        txtKey = CreateModernInput("Khóa bảo mật (AES-256 Key):", "", cardNetwork, ref startY, isPassword: true);
+        txtKey = CreateModernInput("Khóa bảo mật (Password):", "", cardNetwork, ref startY, isPassword: true);
+
+        // AES Size Selection
+        cardNetwork.Controls.Add(new Label
+        {
+            Text = "Cỡ khóa AES:",
+            ForeColor = ThemeColors.TextSecondary,
+            Font = ThemeColors.BodyFont,
+            AutoSize = true,
+            Location = new Point(20, startY)
+        });
+
+        cmbAesSize = new ComboBox
+        {
+            Text = "AES-256 (Bảo mật cao)",
+            Width = 710,
+            BackColor = ThemeColors.InputBackground,
+            ForeColor = ThemeColors.TextPrimary,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(20, startY + 25),
+            Font = new Font("Segoe UI", 12F)
+        };
+        cmbAesSize.Items.AddRange(new[]
+        {
+            "AES-128 (Nhanh)",
+            "AES-192 (Cân bằng)",
+            "AES-256 (Bảo mật cao)"
+        });
+        cmbAesSize.SelectedIndex = 2;  // Default: AES-256
+        cardNetwork.Controls.Add(cmbAesSize);
+        startY += 85;
+
         pnlContent.Controls.Add(cardNetwork);
 
         // Actions Bottom
@@ -203,15 +235,22 @@ public class SenderView : UserControl
 
     private async Task SendActionAsync() {
         if (!ValidateInputs()) return;
-        
+
         try {
             SetLoading(true);
-            var p = new Progress<TransferProgress>(pr => { 
+            var p = new Progress<TransferProgress>(pr => {
                 TransferProgressChanged?.Invoke((int)pr.ProgressPercentage, $"Đang truyền: {pr.ProgressPercentage:F1}% | {pr.Speed / 1024:F1} KB/s");
             });
-            
-            
-            await _manager.EncryptAndSendAsync(_selectedFile, txtIp.Text.Trim(), int.Parse(txtPort.Text), txtKey.Text.Trim(), p);
+
+            // Get selected AES size
+            AesKeySize keySize = cmbAesSize.SelectedIndex switch
+            {
+                0 => AesKeySize.AES128,
+                1 => AesKeySize.AES192,
+                _ => AesKeySize.AES256
+            };
+
+            await _manager.EncryptAndSendAsync(_selectedFile, txtIp.Text.Trim(), int.Parse(txtPort.Text), txtKey.Text.Trim(), keySize, p);
             TransferProgressChanged?.Invoke(100, "Truyền nhận dữ liệu thành công.");
             MessageBox.Show("Gửi file thành công!", "Hoàn tất", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -229,8 +268,17 @@ public class SenderView : UserControl
         if (sfd.ShowDialog() == DialogResult.OK) {
             try {
                 SetLoading(true);
-                await _manager.LocalEncryptAsync(_selectedFile, sfd.FileName, txtKey.Text);
-                TransferProgressChanged?.Invoke(100, $"Mã hóa nội bộ thành công: {Path.GetFileName(sfd.FileName)}");
+
+                // Get selected AES size
+                AesKeySize keySize = cmbAesSize.SelectedIndex switch
+                {
+                    0 => AesKeySize.AES128,
+                    1 => AesKeySize.AES192,
+                    _ => AesKeySize.AES256
+                };
+
+                await _manager.LocalEncryptAsync(_selectedFile, sfd.FileName, txtKey.Text, keySize);
+                TransferProgressChanged?.Invoke(100, $"Mã hóa nội bộ thành công: {Path.GetFileName(sfd.FileName)} (AES-{keySize})");
                 RequestOpenFolder?.Invoke(sfd.FileName);
                 MessageBox.Show("Mã hóa thành công!", "Thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }

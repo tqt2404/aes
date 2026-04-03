@@ -24,7 +24,7 @@ static class Program
             .ConfigureServices((context, services) => {
                 services.Configure<AppConfig>(context.Configuration.GetSection("AppConfig"));
                 
-                services.AddSingleton<IAesCryptography, AesService>();
+                services.AddSingleton<IAesCryptography, AesCryptographyService>();
                 services.AddSingleton<ITcpClient, TcpSender>();
                 services.AddSingleton<ITcpServer, TcpReceiver>();
                 services.AddSingleton<DatabaseService>();

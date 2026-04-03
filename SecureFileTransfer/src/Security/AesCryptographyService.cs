@@ -4,12 +4,9 @@ using SecureFileTransfer.Models;
 
 namespace SecureFileTransfer.Security;
 
-// DEPRECATED: This file has been refactored into separate, enterprise-named classes.
-// See CryptographyProvider.cs, AesCipherFactory.cs, CbcModeOperations.cs, Aes256Impl.cs, and AesCryptographyService.cs
-// This file is kept for reference only. Use AesCryptographyService instead of AesService.
-
-/*
-// DEPRECATED Interface - See AesCryptographyService.cs for new implementation
+/// <summary>
+/// Interface for AES-based file encryption and decryption services.
+/// </summary>
 public interface IAesCryptography
 {
     void EncryptFile(string inputFile, string outputFile, string password, AesKeySize keySize = AesKeySize.AES256);
@@ -18,23 +15,30 @@ public interface IAesCryptography
     Task EncryptStreamAsync(Stream input, Stream output, string password, AesKeySize keySize = AesKeySize.AES256, CancellationToken ct = default);
     Task DecryptStreamAsync(Stream input, Stream output, string password, CancellationToken ct = default);
 }
-*/
 
-// DEPRECATED: Use AesCryptographyService instead.
-// This class is replaced by the refactored AesCryptographyService with improved naming and structure.
-[Obsolete("Use AesCryptographyService instead", false)]
-public class AesService
+/// <summary>
+/// AES cryptography service for secure file encryption and decryption.
+/// 
+/// Uses fully custom AES core implementation (Aes256Impl - from scratch) combined with:
+/// - CBC mode for chaining (CbcModeOperations)
+/// - PKCS7 padding for block alignment
+/// - PBKDF2 key derivation (600,000 iterations)
+/// - HMAC-SHA256 for integrity verification
+/// 
+/// File format: [MetadataLength(4)] [Metadata(JSON)] [Salt(16)] [IV(16)] [EncryptedData] [HMAC(32)]
+/// </summary>
+public class AesCryptographyService : IAesCryptography
 {
     private const int IV_SIZE = 16;
     private const int SALT_SIZE = 16;
     private const int HMAC_SIZE = 32;
-    private const int ITERATIONS = 600000;
-    private const int BUFFER_SIZE = 65536;
-    private const int METADATA_LENGTH_SIZE = 4;  // For length-prefixed metadata
+    private const int ITERATIONS = 600000;  // PBKDF2 iterations (OWASP 2023 recommendation)
+    private const int BUFFER_SIZE = 65536;  // 64 KB streaming buffer
+    private const int METADATA_LENGTH_SIZE = 4;  // 4-byte length prefix
 
     /// <summary>
-    /// Encrypt stream with specified AES key size
-    /// File format: [MetadataLength(4)] [Metadata(JSON)] [Salt(16)] [IV(16)] [EncryptedData] [HMAC(32)]
+    /// Encrypt stream with specified AES key size.
+    /// Handles large files efficiently using streaming.
     /// </summary>
     public async Task EncryptStreamAsync(Stream input, Stream output, string password, AesKeySize keySize = AesKeySize.AES256, CancellationToken ct = default)
     {
@@ -60,7 +64,7 @@ public class AesService
         byte[] iv = CryptographyProvider.GetRandomBytes(IV_SIZE);
 
         // 3. Derive keys based on key size
-        int keyLength = AesFactory.GetKeyLength(keySize);
+        int keyLength = AesCipherFactory.GetKeyLength(keySize);
         byte[] derivedBytes = CryptographyProvider.DeriveKeyFromPassword(password, salt, ITERATIONS, keyLength + 32);
         byte[] aesKey = new byte[keyLength];
         byte[] hmacKey = new byte[32];
@@ -68,8 +72,8 @@ public class AesService
         Array.Copy(derivedBytes, keyLength, hmacKey, 0, 32);
 
         // 4. Create AES and CBC mode
-        var aes = AesFactory.CreateAes(aesKey, keySize);
-        var cbcMode = new CustomCbcMode(aes, iv);
+        var aes = AesCipherFactory.CreateAes(aesKey, keySize);
+        var cbcMode = new CbcModeOperations(aes, iv);
 
         // 5. Write metadata header
         byte[] metadataLengthBytes = BitConverter.GetBytes(metadataJson.Length);
@@ -137,7 +141,8 @@ public class AesService
     }
 
     /// <summary>
-    /// Decrypt stream (automatically detects AES key size from metadata)
+    /// Decrypt stream (automatically detects AES key size from metadata).
+    /// Verifies integrity using HMAC-SHA256.
     /// </summary>
     public async Task DecryptStreamAsync(Stream input, Stream output, string password, CancellationToken ct = default)
     {
@@ -177,7 +182,7 @@ public class AesService
         await input.ReadExactlyAsync(hmacReceived, 0, HMAC_SIZE, ct);
 
         // 5. Derive keys using detected key size
-        int keyLength = AesFactory.GetKeyLength(metadata.EncryptionType);
+        int keyLength = AesCipherFactory.GetKeyLength(metadata.EncryptionType);
         byte[] derivedBytes = CryptographyProvider.DeriveKeyFromPassword(password, salt, ITERATIONS, keyLength + 32);
         byte[] aesKey = new byte[keyLength];
         byte[] hmacKey = new byte[32];
@@ -198,8 +203,8 @@ public class AesService
             throw new CryptographicException("Security error: Incorrect password or data was tampered with");
 
         // 7. Decrypt data
-        var aes = AesFactory.CreateAes(aesKey, metadata.EncryptionType);
-        var cbcMode = new CustomCbcMode(aes, iv);
+        var aes = AesCipherFactory.CreateAes(aesKey, metadata.EncryptionType);
+        var cbcMode = new CbcModeOperations(aes, iv);
 
         byte[] encryptedData = new byte[encryptedDataLength];
         await input.ReadExactlyAsync(encryptedData, 0, (int)encryptedDataLength, ct);
@@ -209,6 +214,34 @@ public class AesService
 
         // 8. Write decrypted data
         await output.WriteAsync(plaintext, 0, plaintext.Length, ct);
+    }
+
+    /// <summary>
+    /// Encrypt file synchronously. Use for smaller files or when async is not available.
+    /// </summary>
+    public void EncryptFile(string inputFile, string outputFile, string password, AesKeySize keySize = AesKeySize.AES256)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(inputFile);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputFile);
+        ArgumentException.ThrowIfNullOrWhiteSpace(password);
+
+        using var fsIn = new FileStream(inputFile, FileMode.Open, FileAccess.Read);
+        using var fsOut = new FileStream(outputFile, FileMode.Create, FileAccess.Write);
+        EncryptStreamAsync(fsIn, fsOut, password, keySize).GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// Decrypt file synchronously. Use for smaller files or when async is not available.
+    /// </summary>
+    public void DecryptFile(string inputFile, string outputFile, string password)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(inputFile);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputFile);
+        ArgumentException.ThrowIfNullOrWhiteSpace(password);
+
+        using var fsIn = new FileStream(inputFile, FileMode.Open, FileAccess.Read);
+        using var fsOut = new FileStream(outputFile, FileMode.Create, FileAccess.Write);
+        DecryptStreamAsync(fsIn, fsOut, password).GetAwaiter().GetResult();
     }
 
     private static byte[] AddPkcs7Padding(byte[] data)
@@ -248,19 +281,5 @@ public class AesService
         for (int i = 0; i < a.Length; i++)
             result |= a[i] ^ b[i];
         return result == 0;
-    }
-
-    public void EncryptFile(string inputFile, string outputFile, string password, AesKeySize keySize = AesKeySize.AES256)
-    {
-        using var fsIn = new FileStream(inputFile, FileMode.Open, FileAccess.Read);
-        using var fsOut = new FileStream(outputFile, FileMode.Create, FileAccess.Write);
-        EncryptStreamAsync(fsIn, fsOut, password, keySize).GetAwaiter().GetResult();
-    }
-
-    public void DecryptFile(string inputFile, string outputFile, string password)
-    {
-        using var fsIn = new FileStream(inputFile, FileMode.Open, FileAccess.Read);
-        using var fsOut = new FileStream(outputFile, FileMode.Create, FileAccess.Write);
-        DecryptStreamAsync(fsIn, fsOut, password).GetAwaiter().GetResult();
     }
 }

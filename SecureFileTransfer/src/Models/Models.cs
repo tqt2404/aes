@@ -15,11 +15,27 @@ public enum TransferState
     Error
 }
 
+/// <summary>
+/// AES key sizes supported by the system
+/// </summary>
+public enum AesKeySize
+{
+    AES128 = 128,
+    AES192 = 192,
+    AES256 = 256
+}
+
 public class FileMetadata
 {
     public string FileName { get; set; } = string.Empty;
     public long FileSize { get; set; }
     public string Sha256Hash { get; set; } = string.Empty;
+    public int KeySize { get; set; } 
+
+    /// <summary>
+    /// Encryption type used (determines key derivation size)
+    /// </summary>
+    public AesKeySize EncryptionType { get; set; } = AesKeySize.AES256;
 
     public byte[] Serialize()
     {

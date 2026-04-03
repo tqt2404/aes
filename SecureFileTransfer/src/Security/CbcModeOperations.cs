@@ -1,28 +1,33 @@
-using System;
-
 namespace SecureFileTransfer.Security;
 
-// DEPRECATED: Replaced by CbcModeOperations.cs
-// This class is kept for backward compatibility during transition period.
-// NEW: Use CbcModeOperations instead
-
 /// <summary>
-/// Custom CBC (Cipher Block Chaining) mode implementation từ SCRATCH.
-/// Tự xử lý IV chaining, block processing.
-/// Padding được xử lý ở AesService level.
+/// CBC (Cipher Block Chaining) Mode implementation.
+/// Chains block encryption/decryption operations using initialization vector (IV).
 /// 
-/// DEPRECATED - Use CbcModeOperations instead
+/// This class works in conjunction with Aes256Impl (fully custom AES from scratch)
+/// to provide complete file encryption with proper IV chaining and state management for streaming.
+/// 
+/// Note: Padding is handled at the service level (AesCryptographyService).
+/// This class only handles raw block operations for maximum flexibility.
 /// </summary>
-public class CustomCbcMode
+public class CbcModeOperations
 {
-    private readonly CustomAes256 aes;
+    private readonly Aes256Impl aes;
     private byte[] lastCipherBlock;  // Maintain state for chaining
     private const int BLOCK_SIZE = 16;
 
-    public CustomCbcMode(CustomAes256 aesInstance, byte[] initialVector)
+    /// <summary>
+    /// Initialize CBC mode with an AES cipher and initialization vector.
+    /// </summary>
+    /// <param name="aesInstance">AES cipher instance (Aes256Impl - custom AES from scratch)</param>
+    /// <param name="initialVector">16-byte initialization vector</param>
+    public CbcModeOperations(Aes256Impl aesInstance, byte[] initialVector)
     {
+        ArgumentNullException.ThrowIfNull(aesInstance);
+        ArgumentNullException.ThrowIfNull(initialVector);
+
         if (initialVector.Length != BLOCK_SIZE)
-            throw new ArgumentException($"IV phải là {BLOCK_SIZE} bytes", nameof(initialVector));
+            throw new ArgumentException($"IV must be {BLOCK_SIZE} bytes", nameof(initialVector));
 
         aes = aesInstance;
         lastCipherBlock = new byte[BLOCK_SIZE];
@@ -31,13 +36,17 @@ public class CustomCbcMode
 
     /// <summary>
     /// Encrypt raw blocks without padding (for streaming).
-    /// Data must be multiple of BLOCK_SIZE.
+    /// Data must be a multiple of BLOCK_SIZE (16 bytes).
     /// State is maintained for proper chaining between calls.
     /// </summary>
+    /// <param name="plaintext">Plaintext data to encrypt (must be multiple of 16 bytes)</param>
+    /// <returns>Encrypted ciphertext</returns>
     public byte[] EncryptRaw(byte[] plaintext)
     {
+        ArgumentNullException.ThrowIfNull(plaintext);
+
         if (plaintext.Length % BLOCK_SIZE != 0)
-            throw new ArgumentException($"Plaintext phải là multiple của {BLOCK_SIZE}", nameof(plaintext));
+            throw new ArgumentException($"Plaintext must be multiple of {BLOCK_SIZE}", nameof(plaintext));
 
         byte[] ciphertext = new byte[plaintext.Length];
         byte[] previousCipherBlock = new byte[BLOCK_SIZE];
@@ -45,12 +54,12 @@ public class CustomCbcMode
 
         for (int block = 0; block < plaintext.Length; block += BLOCK_SIZE)
         {
-            // XOR plaintext block với previous ciphertext (hoặc IV)
+            // CBC: XOR plaintext block with previous ciphertext block (or IV for first block)
             byte[] xorBlock = new byte[BLOCK_SIZE];
             for (int i = 0; i < BLOCK_SIZE; i++)
                 xorBlock[i] = (byte)(plaintext[block + i] ^ previousCipherBlock[i]);
 
-            // Encrypt block
+            // Encrypt block using custom Aes256Impl
             byte[] encryptedBlock = new byte[BLOCK_SIZE];
             aes.EncryptBlock(xorBlock, 0, encryptedBlock, 0);
 
@@ -58,7 +67,7 @@ public class CustomCbcMode
             Array.Copy(encryptedBlock, previousCipherBlock, BLOCK_SIZE);
         }
 
-        // Save last ciphertext block for next call
+        // Save last ciphertext block for next call (state for chaining)
         Array.Copy(previousCipherBlock, lastCipherBlock, BLOCK_SIZE);
 
         return ciphertext;
@@ -66,13 +75,17 @@ public class CustomCbcMode
 
     /// <summary>
     /// Decrypt raw blocks without unpadding (for streaming).
-    /// Data must be multiple of BLOCK_SIZE.
+    /// Data must be a multiple of BLOCK_SIZE (16 bytes).
     /// State is maintained for proper chaining between calls.
     /// </summary>
+    /// <param name="ciphertext">Ciphertext data to decrypt (must be multiple of 16 bytes)</param>
+    /// <returns>Decrypted plaintext</returns>
     public byte[] DecryptRaw(byte[] ciphertext)
     {
+        ArgumentNullException.ThrowIfNull(ciphertext);
+
         if (ciphertext.Length % BLOCK_SIZE != 0)
-            throw new ArgumentException($"Ciphertext phải là multiple của {BLOCK_SIZE}", nameof(ciphertext));
+            throw new ArgumentException($"Ciphertext must be multiple of {BLOCK_SIZE}", nameof(ciphertext));
 
         byte[] plaintext = new byte[ciphertext.Length];
         byte[] previousCipherBlock = new byte[BLOCK_SIZE];
@@ -80,11 +93,11 @@ public class CustomCbcMode
 
         for (int block = 0; block < ciphertext.Length; block += BLOCK_SIZE)
         {
-            // Decrypt block
+            // Decrypt block using custom Aes256Impl
             byte[] decryptedBlock = new byte[BLOCK_SIZE];
             aes.DecryptBlock(ciphertext, block, decryptedBlock, 0);
 
-            // XOR với previous ciphertext
+            // CBC: XOR decrypted block with previous ciphertext block
             byte[] plaintextBlock = new byte[BLOCK_SIZE];
             for (int i = 0; i < BLOCK_SIZE; i++)
                 plaintextBlock[i] = (byte)(decryptedBlock[i] ^ previousCipherBlock[i]);
@@ -93,7 +106,7 @@ public class CustomCbcMode
             Array.Copy(ciphertext, block, previousCipherBlock, 0, BLOCK_SIZE);
         }
 
-        // Save last ciphertext block for next call
+        // Save last ciphertext block for next call (state for chaining)
         Array.Copy(previousCipherBlock, lastCipherBlock, BLOCK_SIZE);
 
         return plaintext;
@@ -102,10 +115,11 @@ public class CustomCbcMode
     /// <summary>
     /// Encrypt plaintext with automatic PKCS7 padding.
     /// Convenience method for simple use cases (not for streams).
-    /// WARNING: Each call creates new state - use EncryptRaw for streaming.
+    /// WARNING: Each call creates new state - use EncryptRaw for streaming operations.
     /// </summary>
     public byte[] Encrypt(byte[] plaintext)
     {
+        ArgumentNullException.ThrowIfNull(plaintext);
         byte[] padded = AddPkcs7Padding(plaintext);
         return EncryptRaw(padded);
     }
@@ -116,6 +130,7 @@ public class CustomCbcMode
     /// </summary>
     public byte[] Decrypt(byte[] ciphertext)
     {
+        ArgumentNullException.ThrowIfNull(ciphertext);
         byte[] plain = DecryptRaw(ciphertext);
         return RemovePkcs7Padding(plain);
     }

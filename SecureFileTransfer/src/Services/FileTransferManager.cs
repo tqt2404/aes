@@ -20,7 +20,7 @@ public class FileTransferManager
         _db = db;
     }
 
-    public async Task EncryptAndSendAsync(string filePath, string ip, int port, string password, IProgress<TransferProgress>? progress = null, CancellationToken ct = default)
+    public async Task EncryptAndSendAsync(string filePath, string ip, int port, string password, AesKeySize keySize = AesKeySize.AES256, IProgress<TransferProgress>? progress = null, CancellationToken ct = default)
     {
         ValidateFile(filePath);
 
@@ -28,16 +28,23 @@ public class FileTransferManager
         long originalFileSize = new FileInfo(filePath).Length;
         string hash = await HashHelper.ComputeSha256Async(filePath, ct);
 
-        // Kích thước tệp mã hóa: Salt(16) + IV(16) + Ciphertext(Padded) + HMAC(32)
-        long encryptedSize = 16 + 16 + ((originalFileSize / 16) + 1) * 16 + 32;
-        var metadata = new FileMetadata { FileName = fileName, FileSize = encryptedSize, Sha256Hash = hash };
+        // Kích thước tệp mã hóa: MetadataLength(4) + Metadata(JSON) + Salt(16) + IV(16) + Ciphertext(Padded) + HMAC(32)
+        long encryptedSize = 4 + 100 + 16 + 16 + ((originalFileSize / 16) + 1) * 16 + 32;
+        var metadata = new FileMetadata 
+        { 
+            FileName = fileName, 
+            FileSize = encryptedSize, 
+            Sha256Hash = hash, 
+            EncryptionType = keySize,
+            KeySize = (int)keySize  // Store the key size for receiver to auto-detect
+        };
 
-        Logger.Log($"Mã hóa và truyền tải: {fileName}");
-        
-        await _client.SendActionAsync(ip, port, metadata, async ns => 
+        Logger.Log($"Mã hóa và truyền tải: {fileName} (AES-{keySize}, KeySize={metadata.KeySize} bits)");
+
+        await _client.SendActionAsync(ip, port, metadata, async ns =>
         {
             using var fsIn = new FileStream(filePath, FileMode.Open, FileAccess.Read);
-            await _crypto.EncryptStreamAsync(fsIn, ns, password, ct);
+            await _crypto.EncryptStreamAsync(fsIn, ns, password, keySize, ct);
         }, ct);
 
         _ = _db.LogTransferAsync(fileName, originalFileSize, "Local", ip, "Sent");
@@ -47,6 +54,20 @@ public class FileTransferManager
     public async Task<string> ReceiveAndDecryptAsync(int port, string saveFolder, string password, CancellationToken ct, IProgress<TransferProgress>? progress = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(saveFolder);
+
+        // Path Traversal Protection
+        // Sanitize save folder path internally when metadata is received in DecryptAndVerifyAsync
+        
+        // Ensure Directory Exists and handle UnauthorizedAccessException
+        try 
+        {
+            if (!Directory.Exists(saveFolder)) 
+                Directory.CreateDirectory(saveFolder);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new UnauthorizedAccessException($"[Security Error] Access denied creating folder: {ex.Message}", ex);
+        }
         
         string tempEnc = Path.Combine(saveFolder, $"incoming_{Guid.NewGuid():N}.tmp");
         try 
@@ -62,8 +83,16 @@ public class FileTransferManager
 
     private async Task<string> DecryptAndVerifyAsync(FileMetadata metadata, string sourcePath, string saveFolder, string password, CancellationToken ct)
     {
-        Logger.Log($"Giải mã tệp tin: {metadata.FileName}");
-        string finalPath = Path.Combine(saveFolder, metadata.FileName);
+        // Path Traversal Protection
+        string sanitizedFileName = Path.GetFileName(metadata.FileName);
+        string finalPath = Path.Combine(saveFolder, sanitizedFileName);
+
+        if (!Path.GetFullPath(finalPath).StartsWith(Path.GetFullPath(saveFolder)))
+        {
+            throw new UnauthorizedAccessException("Path traversal attack detected!");
+        }
+
+        Logger.Log($"Giải mã tệp tin: {metadata.FileName} -> {sanitizedFileName}");
         
         using (var fsIn = new FileStream(sourcePath, FileMode.Open, FileAccess.Read))
         using (var fsOut = new FileStream(finalPath, FileMode.Create, FileAccess.Write))
@@ -77,12 +106,12 @@ public class FileTransferManager
         return Path.GetFullPath(finalPath);
     }
 
-    public async Task LocalEncryptAsync(string inputPath, string outputPath, string password)
+    public async Task LocalEncryptAsync(string inputPath, string outputPath, string password, AesKeySize keySize = AesKeySize.AES256)
     {
         ValidateFile(inputPath);
         using var fsIn = new FileStream(inputPath, FileMode.Open, FileAccess.Read);
         using var fsOut = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
-        await _crypto.EncryptStreamAsync(fsIn, fsOut, password);
+        await _crypto.EncryptStreamAsync(fsIn, fsOut, password, keySize);
     }
 
     public async Task LocalDecryptAsync(string inputPath, string outputPath, string password)
@@ -96,14 +125,33 @@ public class FileTransferManager
     public async Task<string> ReceiveOnlyAsync(int port, string saveFolder, CancellationToken ct, IProgress<TransferProgress>? progress = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(saveFolder);
+        
+        try 
+        {
+            if (!Directory.Exists(saveFolder)) 
+                Directory.CreateDirectory(saveFolder);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new UnauthorizedAccessException($"[Security Error] Access denied creating folder: {ex.Message}", ex);
+        }
+
         string temp = Path.Combine(saveFolder, $"receiving_{Guid.NewGuid():N}.tmp");
         
         var metadata = await _server.StartListeningAsync(port, temp, ct, progress);
         
-        string fileName = metadata.FileName.EndsWith(".enc", StringComparison.OrdinalIgnoreCase) 
-                          ? metadata.FileName : metadata.FileName + ".enc";
+        // Path Traversal Protection
+        string sanitizedFileName = Path.GetFileName(metadata.FileName);
+        string fileName = sanitizedFileName.EndsWith(".enc", StringComparison.OrdinalIgnoreCase) 
+                          ? sanitizedFileName : sanitizedFileName + ".enc";
         
         string finalPath = Path.Combine(saveFolder, fileName);
+
+        if (!Path.GetFullPath(finalPath).StartsWith(Path.GetFullPath(saveFolder)))
+        {
+            throw new UnauthorizedAccessException("Path traversal attack detected!");
+        }
+
         if (File.Exists(finalPath)) File.Delete(finalPath);
         File.Move(temp, finalPath);
 

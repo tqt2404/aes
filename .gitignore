@@ -22,6 +22,12 @@ obj/
 !INSTALL.txt
 !*.md
 
+# Build Logs (explicitly ensure ignored)
+build_errors.log
+build_warnings.txt
+msbuild.log
+*.csproj.FileListAbsolute.txt
+
 # Test & Automation artifacts
 automation_temp/
 attack_demo/

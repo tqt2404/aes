@@ -98,7 +98,7 @@ public class CryptographicVectorTests_Refactored
     /// <summary>
     /// AES-256 ECB mode test vectors (for block cipher validation)
     /// From NIST SP 800-38A Appendix F
-    /// Uses custom Aes256Impl (fully custom AES from scratch)
+    /// Uses custom Aes256CoreImpl (fully custom AES from scratch - FIPS 197)
     /// </summary>
     [Fact]
     public void TestAes256Impl_BlockEncryption()
@@ -109,7 +109,7 @@ public class CryptographicVectorTests_Refactored
         byte[] plaintext = HexToBytes("6bc1bee22e409f96e93d7e117393172a");
 
         // Act
-        var aes = new Aes256Impl(key);
+        var aes = new Aes256CoreImpl(key);
         byte[] ciphertext = new byte[16];
         aes.EncryptBlock(plaintext, 0, ciphertext, 0);
 
@@ -123,7 +123,7 @@ public class CryptographicVectorTests_Refactored
 
     /// <summary>
     /// CBC mode round-trip test with known data
-    /// Uses custom CbcModeOperations implementation with Aes256Impl
+    /// Uses custom CbcModeOperations implementation with Aes256CoreImpl (FIPS 197)
     /// </summary>
     [Fact]
     public void TestCbcModeOperations_RoundTrip()
@@ -138,11 +138,11 @@ public class CryptographicVectorTests_Refactored
         byte[] plaintextBytes = System.Text.Encoding.UTF8.GetBytes(plaintext);
 
         // Act
-        var aes = new Aes256Impl(key);
+        var aes = new Aes256CoreImpl(key);
         var cbcEnc = new CbcModeOperations(aes, iv);
         byte[] ciphertext = cbcEnc.Encrypt(plaintextBytes);
 
-        var aes2 = new Aes256Impl(key);
+        var aes2 = new Aes256CoreImpl(key);
         var cbcDec = new CbcModeOperations(aes2, iv);
         byte[] decrypted = cbcDec.Decrypt(ciphertext);
 

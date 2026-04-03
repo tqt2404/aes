@@ -7,7 +7,7 @@ namespace SecureFileTransfer.Tests;
 
 public class IntegrityAndSecurityTests : IDisposable
 {
-    private readonly AesService _aesService;
+    private readonly IAesCryptography _aesService;
     private readonly string _testDir;
     private readonly string _originalFile;
     private readonly string _encryptedFile;
@@ -16,7 +16,7 @@ public class IntegrityAndSecurityTests : IDisposable
 
     public IntegrityAndSecurityTests()
     {
-        _aesService = new AesService();
+        _aesService = new AesCryptographyService();
         _testDir = Path.Combine(Path.GetTempPath(), $"SecureFileTransfer_Test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testDir);
 

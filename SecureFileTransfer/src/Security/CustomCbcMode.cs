@@ -15,11 +15,11 @@ namespace SecureFileTransfer.Security;
 /// </summary>
 public class CustomCbcMode
 {
-    private readonly CustomAes256 aes;
+    private readonly Aes256CoreImpl aes;
     private byte[] lastCipherBlock;  // Maintain state for chaining
     private const int BLOCK_SIZE = 16;
 
-    public CustomCbcMode(CustomAes256 aesInstance, byte[] initialVector)
+    public CustomCbcMode(Aes256CoreImpl aesInstance, byte[] initialVector)
     {
         if (initialVector.Length != BLOCK_SIZE)
             throw new ArgumentException($"IV phải là {BLOCK_SIZE} bytes", nameof(initialVector));

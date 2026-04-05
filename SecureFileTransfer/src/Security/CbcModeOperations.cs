@@ -1,167 +1,86 @@
 namespace SecureFileTransfer.Security;
 
 /// <summary>
-/// CBC (Cipher Block Chaining) Mode implementation.
-/// Chains block encryption/decryption operations using initialization vector (IV).
+/// CBC (Cipher Block Chaining) mode for streaming AES encryption/decryption.
+/// Works with AesCoreImpl (custom FIPS 197 AES from scratch).
 /// 
-/// This class works in conjunction with AesCoreImpl (fully custom AES from scratch - FIPS 197)
-/// to provide complete file encryption with proper IV chaining and state management for streaming.
-/// 
-/// Note: Padding is handled at the service level (AesCryptographyService).
-/// This class only handles raw block operations for maximum flexibility.
+/// Padding is handled externally by AesCryptographyService – this class
+/// only performs raw block operations so chaining state stays consistent
+/// across multiple streaming calls.
 /// </summary>
 public class CbcModeOperations
 {
-    private readonly AesCoreImpl aes;
-    private byte[] lastCipherBlock;  // Maintain state for chaining
+    private readonly AesCoreImpl _aes;
+    private byte[] _lastCipherBlock;
     private const int BLOCK_SIZE = 16;
 
-    /// <summary>
-    /// Initialize CBC mode with an AES cipher and initialization vector.
-    /// </summary>
-    /// <param name="aesInstance">AES cipher instance (Aes256CoreImpl - custom AES from scratch - FIPS 197)</param>
-    /// <param name="initialVector">16-byte initialization vector</param>
-    public CbcModeOperations(AesCoreImpl aesInstance, byte[] initialVector)
+    public CbcModeOperations(AesCoreImpl aesInstance, byte[] iv)
     {
         ArgumentNullException.ThrowIfNull(aesInstance);
-        ArgumentNullException.ThrowIfNull(initialVector);
+        ArgumentNullException.ThrowIfNull(iv);
 
-        if (initialVector.Length != BLOCK_SIZE)
-            throw new ArgumentException($"IV must be {BLOCK_SIZE} bytes", nameof(initialVector));
+        if (iv.Length != BLOCK_SIZE)
+            throw new ArgumentException($"IV must be {BLOCK_SIZE} bytes", nameof(iv));
 
-        aes = aesInstance;
-        lastCipherBlock = new byte[BLOCK_SIZE];
-        Array.Copy(initialVector, lastCipherBlock, BLOCK_SIZE);
+        _aes = aesInstance;
+        _lastCipherBlock = (byte[])iv.Clone();
     }
 
     /// <summary>
-    /// Encrypt raw blocks without padding (for streaming).
-    /// Data must be a multiple of BLOCK_SIZE (16 bytes).
-    /// State is maintained for proper chaining between calls.
+    /// Encrypt raw blocks (no padding). Data must be a multiple of 16 bytes.
+    /// Chaining state is preserved between calls for streaming.
     /// </summary>
-    /// <param name="plaintext">Plaintext data to encrypt (must be multiple of 16 bytes)</param>
-    /// <returns>Encrypted ciphertext</returns>
     public byte[] EncryptRaw(byte[] plaintext)
     {
         ArgumentNullException.ThrowIfNull(plaintext);
-
         if (plaintext.Length % BLOCK_SIZE != 0)
-            throw new ArgumentException($"Plaintext must be multiple of {BLOCK_SIZE}", nameof(plaintext));
+            throw new ArgumentException($"Plaintext must be a multiple of {BLOCK_SIZE}", nameof(plaintext));
 
         byte[] ciphertext = new byte[plaintext.Length];
-        byte[] previousCipherBlock = new byte[BLOCK_SIZE];
-        Array.Copy(lastCipherBlock, previousCipherBlock, BLOCK_SIZE);
+        byte[] prev = (byte[])_lastCipherBlock.Clone();
 
-        for (int block = 0; block < plaintext.Length; block += BLOCK_SIZE)
+        for (int offset = 0; offset < plaintext.Length; offset += BLOCK_SIZE)
         {
-            // CBC: XOR plaintext block with previous ciphertext block (or IV for first block)
-            byte[] xorBlock = new byte[BLOCK_SIZE];
+            byte[] xored = new byte[BLOCK_SIZE];
             for (int i = 0; i < BLOCK_SIZE; i++)
-                xorBlock[i] = (byte)(plaintext[block + i] ^ previousCipherBlock[i]);
+                xored[i] = (byte)(plaintext[offset + i] ^ prev[i]);
 
-            // Encrypt block using custom Aes256CoreImpl (FIPS 197)
-            byte[] encryptedBlock = new byte[BLOCK_SIZE];
-            aes.EncryptBlock(xorBlock, 0, encryptedBlock, 0);
-
-            Array.Copy(encryptedBlock, 0, ciphertext, block, BLOCK_SIZE);
-            Array.Copy(encryptedBlock, previousCipherBlock, BLOCK_SIZE);
+            byte[] block = new byte[BLOCK_SIZE];
+            _aes.EncryptBlock(xored, 0, block, 0);
+            Buffer.BlockCopy(block, 0, ciphertext, offset, BLOCK_SIZE);
+            prev = block;
         }
 
-        // Save last ciphertext block for next call (state for chaining)
-        Array.Copy(previousCipherBlock, lastCipherBlock, BLOCK_SIZE);
-
+        _lastCipherBlock = prev;
         return ciphertext;
     }
 
     /// <summary>
-    /// Decrypt raw blocks without unpadding (for streaming).
-    /// Data must be a multiple of BLOCK_SIZE (16 bytes).
-    /// State is maintained for proper chaining between calls.
+    /// Decrypt raw blocks (no unpadding). Data must be a multiple of 16 bytes.
+    /// Chaining state is preserved between calls for streaming.
     /// </summary>
-    /// <param name="ciphertext">Ciphertext data to decrypt (must be multiple of 16 bytes)</param>
-    /// <returns>Decrypted plaintext</returns>
     public byte[] DecryptRaw(byte[] ciphertext)
     {
         ArgumentNullException.ThrowIfNull(ciphertext);
-
         if (ciphertext.Length % BLOCK_SIZE != 0)
-            throw new ArgumentException($"Ciphertext must be multiple of {BLOCK_SIZE}", nameof(ciphertext));
+            throw new ArgumentException($"Ciphertext must be a multiple of {BLOCK_SIZE}", nameof(ciphertext));
 
         byte[] plaintext = new byte[ciphertext.Length];
-        byte[] previousCipherBlock = new byte[BLOCK_SIZE];
-        Array.Copy(lastCipherBlock, previousCipherBlock, BLOCK_SIZE);
+        byte[] prev = (byte[])_lastCipherBlock.Clone();
 
-        for (int block = 0; block < ciphertext.Length; block += BLOCK_SIZE)
+        for (int offset = 0; offset < ciphertext.Length; offset += BLOCK_SIZE)
         {
-            // Decrypt block using custom Aes256CoreImpl (FIPS 197)
-            byte[] decryptedBlock = new byte[BLOCK_SIZE];
-            aes.DecryptBlock(ciphertext, block, decryptedBlock, 0);
+            byte[] block = new byte[BLOCK_SIZE];
+            _aes.DecryptBlock(ciphertext, offset, block, 0);
 
-            // CBC: XOR decrypted block with previous ciphertext block
-            byte[] plaintextBlock = new byte[BLOCK_SIZE];
             for (int i = 0; i < BLOCK_SIZE; i++)
-                plaintextBlock[i] = (byte)(decryptedBlock[i] ^ previousCipherBlock[i]);
+                plaintext[offset + i] = (byte)(block[i] ^ prev[i]);
 
-            Array.Copy(plaintextBlock, 0, plaintext, block, BLOCK_SIZE);
-            Array.Copy(ciphertext, block, previousCipherBlock, 0, BLOCK_SIZE);
+            prev = new byte[BLOCK_SIZE];
+            Buffer.BlockCopy(ciphertext, offset, prev, 0, BLOCK_SIZE);
         }
 
-        // Save last ciphertext block for next call (state for chaining)
-        Array.Copy(previousCipherBlock, lastCipherBlock, BLOCK_SIZE);
-
+        _lastCipherBlock = prev;
         return plaintext;
-    }
-
-    /// <summary>
-    /// Encrypt plaintext with automatic PKCS7 padding.
-    /// Convenience method for simple use cases (not for streams).
-    /// WARNING: Each call creates new state - use EncryptRaw for streaming operations.
-    /// </summary>
-    public byte[] Encrypt(byte[] plaintext)
-    {
-        ArgumentNullException.ThrowIfNull(plaintext);
-        byte[] padded = AddPkcs7Padding(plaintext);
-        return EncryptRaw(padded);
-    }
-
-    /// <summary>
-    /// Decrypt ciphertext with automatic PKCS7 unpadding.
-    /// Convenience method for simple use cases (not for streams).
-    /// </summary>
-    public byte[] Decrypt(byte[] ciphertext)
-    {
-        ArgumentNullException.ThrowIfNull(ciphertext);
-        byte[] plain = DecryptRaw(ciphertext);
-        return RemovePkcs7Padding(plain);
-    }
-
-    private static byte[] AddPkcs7Padding(byte[] data)
-    {
-        int paddingLen = BLOCK_SIZE - (data.Length % BLOCK_SIZE);
-        byte[] padded = new byte[data.Length + paddingLen];
-        Array.Copy(data, padded, data.Length);
-        for (int i = 0; i < paddingLen; i++)
-            padded[data.Length + i] = (byte)paddingLen;
-        return padded;
-    }
-
-    private static byte[] RemovePkcs7Padding(byte[] data)
-    {
-        if (data.Length == 0)
-            throw new ArgumentException("Data cannot be empty for padding removal");
-
-        int paddingLen = data[data.Length - 1];
-        if (paddingLen <= 0 || paddingLen > BLOCK_SIZE)
-            throw new ArgumentException("Invalid or corrupted padding");
-
-        for (int i = 0; i < paddingLen; i++)
-        {
-            if (data[data.Length - 1 - i] != paddingLen)
-                throw new ArgumentException("Invalid or corrupted padding");
-        }
-
-        byte[] unpadded = new byte[data.Length - paddingLen];
-        Array.Copy(data, unpadded, unpadded.Length);
-        return unpadded;
     }
 }

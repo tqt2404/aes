@@ -57,24 +57,4 @@ public class AesCipherFactory
         };
     }
 
-    /// <summary>
-    /// Get AES round count for variant.
-    /// Number of rounds determines encryption strength and performance.
-    /// 
-    /// AES-128: 10 rounds
-    /// AES-192: 12 rounds
-    /// AES-256: 14 rounds
-    /// </summary>
-    /// <param name="keySize">AES variant</param>
-    /// <returns>Number of rounds (10, 12, or 14)</returns>
-    public static int GetRoundCount(AesKeySize keySize)
-    {
-        return keySize switch
-        {
-            AesKeySize.AES128 => 10,
-            AesKeySize.AES192 => 12,
-            AesKeySize.AES256 => 14,
-            _ => throw new ArgumentException($"Unsupported key size: {keySize}")
-        };
-    }
 }

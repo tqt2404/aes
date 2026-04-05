@@ -1,11 +1,13 @@
- using System;
+using System;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Extensions.Options;
 using SecureFileTransfer.Models;
 using SecureFileTransfer.Services;
+using SecureFileTransfer.Network;
 using SecureFileTransfer.UI.Styles;
 using SecureFileTransfer.UI.UserControls;
 using SecureFileTransfer.Utils;
@@ -15,6 +17,8 @@ namespace SecureFileTransfer.UI;
 public partial class MainForm : Form
 {
     private readonly FileTransferManager _manager;
+    private readonly HubTcpClient _hubClient;
+    private readonly CentralHubServer _hubServer;
     private readonly AppConfig _config;
 
     private readonly SenderView _senderView;
@@ -28,10 +32,13 @@ public partial class MainForm : Form
     private Label lblStatus = default!;
     private ModernButton btnOpenFolder = default!;
     private ModernButton btnThemeToggle = default!;
+    private ModernButton btnStartServer = default!;
     private string _lastSavedPath = "";
     private Panel pnlActiveIndicator = default!;
     private System.Windows.Forms.Timer _fadeTimer = default!;
     private float _opacity = 0;
+
+    private bool _isServerRunning = false;
 
     // Drag move support
     public const int WM_NCLBUTTONDOWN = 0xA1;
@@ -41,36 +48,111 @@ public partial class MainForm : Form
     [DllImportAttribute("user32.dll")]
     public static extern bool ReleaseCapture();
 
-    public MainForm(FileTransferManager manager, IOptions<AppConfig> config)
+    public MainForm(FileTransferManager manager, HubTcpClient hubClient, CentralHubServer hubServer, IOptions<AppConfig> config)
     {
         _manager = manager;
+        _hubClient = hubClient;
+        _hubServer = hubServer;
         _config = config.Value;
 
-        // Create Views
-        _senderView = new SenderView(_manager, _config);
+        _manager.AttachHubClient(_hubClient);
+
+        _senderView = new SenderView(_manager, _hubClient, _config);
         _receiverView = new ReceiverView(_manager, _config);
 
-        // Bind Events
         BindEvents(_senderView);
         BindEvents(_receiverView);
 
-        // Notify Sender if Receiver is listening locally
-        _receiverView.ListeningStateChanged += (isListening) => {
-            _senderView.SetReceiverReadyStatus(isListening);
+        // Bind global receiver events explicitly
+        _manager.OnReceiveProgress += (pr) => {
+            Invoke(() => {
+                prgTransfer.Maximum = 100;
+                int percent = (int)(pr.BytesTransferred * 100 / (pr.TotalBytes > 0 ? pr.TotalBytes : 1));
+                prgTransfer.Value = percent > 100 ? 100 : percent;
+                lblStatus.Text = $"Đang nhận: {percent}%";
+            });
         };
 
         _fadeTimer = new System.Windows.Forms.Timer { Interval = 20 };
         _fadeTimer.Tick += (s, e) => {
             _opacity += 0.1f;
-            if (_opacity >= 1.0f) {
-                _opacity = 1.0f;
-                _fadeTimer.Stop();
-            }
+            if (_opacity >= 1.0f) { _opacity = 1.0f; _fadeTimer.Stop(); }
         };
 
         ThemeColors.ThemeChanged += ApplyTheme;
 
         InitializeComponent();
+        this.Load += MainForm_Load;
+    }
+
+    private async void MainForm_Load(object? sender, EventArgs e)
+    {
+        bool connected = await RequestLoginAsync();
+        if (!connected)
+        {
+            Application.Exit();
+            return;
+        }
+    }
+
+    private async Task<bool> RequestLoginAsync()
+    {
+        using var tempForm = new Form 
+        { 
+            Width = 400, Height = 300, 
+            Text = "Kết nối Hub Server", 
+            StartPosition = FormStartPosition.CenterScreen,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false, MinimizeBox = false,
+            BackColor = ThemeColors.WindowBackground,
+            ForeColor = ThemeColors.TextPrimary
+        };
+
+        var lblIp = new Label { Text = "Hub IP:", Location = new Point(20, 20), AutoSize = true, ForeColor = ThemeColors.TextPrimary };
+        var txtIp = new TextBox { Text = "127.0.0.1", Location = new Point(20, 45), Width = 340, BackColor = ThemeColors.InputBackground, ForeColor = ThemeColors.TextPrimary };
+
+        var lblName = new Label { Text = "Tên hiển thị:", Location = new Point(20, 80), AutoSize = true, ForeColor = ThemeColors.TextPrimary };
+        var txtName = new TextBox { Text = $"User_{new Random().Next(1000, 9999)}", Location = new Point(20, 105), Width = 340, BackColor = ThemeColors.InputBackground, ForeColor = ThemeColors.TextPrimary };
+
+        var btnConnect = new Button { Text = "KẾT NỐI", Location = new Point(20, 160), Width = 340, Height = 40, BackColor = ThemeColors.Primary, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        btnConnect.FlatAppearance.BorderSize = 0;
+
+        var chkHost = new CheckBox { Text = "Chạy kèm Hub Server ngầm (Port 5000)", Location = new Point(20, 210), AutoSize = true, ForeColor = ThemeColors.TextSecondary };
+
+        tempForm.Controls.AddRange(new Control[] { lblIp, txtIp, lblName, txtName, btnConnect, chkHost });
+
+        bool isConnected = false;
+
+        btnConnect.Click += async (s, e) =>
+        {
+            btnConnect.Enabled = false;
+            btnConnect.Text = "Đang kết nối...";
+            try
+            {
+                if (chkHost.Checked) 
+                {
+                    _isServerRunning = true;
+                    _ = _hubServer.StartAsync();
+                    txtIp.Text = "127.0.0.1"; // auto connect to self
+                    btnStartServer.Text = "DỪNG SERVER";
+                    btnStartServer.BackColor = ThemeColors.Danger;
+                }
+
+                await _hubClient.ConnectAsync(txtIp.Text.Trim(), 5000, txtName.Text.Trim());
+                isConnected = true;
+                this.Text = $"ENTERPRISE SECURE DATA GATEWAY - [{txtName.Text}]";
+                tempForm.Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Không thể kết nối Hub: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                btnConnect.Enabled = true;
+                btnConnect.Text = "KẾT NỐI";
+            }
+        };
+
+        tempForm.ShowDialog();
+        return isConnected;
     }
 
     private void BindEvents(dynamic view)
@@ -103,13 +185,12 @@ public partial class MainForm : Form
         this.DoubleBuffered = true;
 
         var header = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = ThemeColors.SidebarBackground };
-        var lblTitle = new Label { Text = "ENTERPRISE SECURE DATA GATEWAY", ForeColor = ThemeColors.TextAccent, Font = ThemeColors.TitleFont, AutoSize = true, Location = new Point(15, 8) };
+        var lblTitle = new Label { Text = "ENTERPRISE SECURE DATA GATEWAY - HUB & SPOKE", ForeColor = ThemeColors.TextAccent, Font = ThemeColors.TitleFont, AutoSize = true, Location = new Point(15, 8) };
         header.Controls.Add(lblTitle);
         
-        // Window Control Buttons
         var btnClose = new Button { Text = "✕", Dock = DockStyle.Right, Width = 40, FlatStyle = FlatStyle.Flat, ForeColor = Color.Gray, Cursor = Cursors.Hand };
         btnClose.FlatAppearance.BorderSize = 0;
-        btnClose.Click += (s, e) => Application.Exit();
+        btnClose.Click += (s, e) => { _hubServer.Stop(); Application.Exit(); };
         
         var btnMinimize = new Button { Text = "―", Dock = DockStyle.Right, Width = 40, FlatStyle = FlatStyle.Flat, ForeColor = Color.Gray, Cursor = Cursors.Hand };
         btnMinimize.FlatAppearance.BorderSize = 0;
@@ -122,13 +203,8 @@ public partial class MainForm : Form
         header.Controls.Add(btnMinimize);
         header.Controls.Add(btnClose);
         
-        // Drag to move
-        header.MouseDown += (s, e) => {
-            if (e.Button == MouseButtons.Left) { ReleaseCapture(); SendMessage(Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0); }
-        };
-        lblTitle.MouseDown += (s, e) => {
-            if (e.Button == MouseButtons.Left) { ReleaseCapture(); SendMessage(Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0); }
-        };
+        header.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) { ReleaseCapture(); SendMessage(Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0); } };
+        lblTitle.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) { ReleaseCapture(); SendMessage(Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0); } };
 
         this.Controls.Add(header);
 
@@ -138,16 +214,24 @@ public partial class MainForm : Form
         var btnNavSend = CreateSidebarButton("Gửi Dữ Liệu", "");
         var btnNavReceive = CreateSidebarButton("Nhận Dữ Liệu", "");
         
+        btnStartServer = CreateModernButton("CHẠY SERVER NGẦM", ThemeColors.Success, 210, 40);
+        btnStartServer.Dock = DockStyle.Bottom;
+        btnStartServer.Margin = new Padding(20);
+        btnStartServer.Click += BtnStartServer_Click;
+
         btnNavSend.Click += (s, e) => SwitchView(_senderView, btnNavSend);
         btnNavReceive.Click += (s, e) => SwitchView(_receiverView, btnNavReceive);
 
         pnlSidebar.Controls.Add(btnNavReceive);
         pnlSidebar.Controls.Add(btnNavSend);
+        
+        var bottomSidebar = new Panel { Dock = DockStyle.Bottom, Height = 80, Padding = new Padding(20) };
+        bottomSidebar.Controls.Add(btnStartServer);
+        pnlSidebar.Controls.Add(bottomSidebar);
+
         this.Controls.Add(pnlSidebar);
 
-        // Bottom Panel
         pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 160, BackColor = ThemeColors.WindowBackground, Padding = new Padding(15) };
-        
         var pnlStatus = new Panel { Dock = DockStyle.Top, Height = 60, Padding = new Padding(0, 5, 0, 5) };
         prgTransfer = new ModernProgressBar { Dock = DockStyle.Top, Height = 6, Maximum = 100 };
         lblStatus = new Label { Text = "Hệ thống sẵn sàng.", Dock = DockStyle.Left, ForeColor = ThemeColors.TextSecondary, Font = new Font("Segoe UI", 9F, FontStyle.Italic), AutoSize = true, Padding = new Padding(0, 15, 0, 0) };
@@ -164,43 +248,56 @@ public partial class MainForm : Form
         pnlBottom.Controls.Add(pnlStatus);
         this.Controls.Add(pnlBottom);
 
-        // Main Content Area
         pnlContent = new Panel { Dock = DockStyle.Fill, BackColor = ThemeColors.PanelSurface };
         this.Controls.Add(pnlContent);
         pnlContent.BringToFront();
 
-        // Sidebar Indicator
         pnlActiveIndicator = new Panel { Width = 4, Height = 60, BackColor = ThemeColors.TextAccent, Visible = false };
         pnlSidebar.Controls.Add(pnlActiveIndicator);
 
-        // Default View
         SwitchView(_senderView, (ModernButton)btnNavSend);
+    }
+
+    private void BtnStartServer_Click(object? sender, EventArgs e)
+    {
+        if (_isServerRunning)
+        {
+            _hubServer.Stop();
+            _isServerRunning = false;
+            btnStartServer.Text = "CHẠY SERVER NGẦM";
+            btnStartServer.BackColor = ThemeColors.Success;
+        }
+        else
+        {
+            _ = _hubServer.StartAsync();
+            _isServerRunning = true;
+            btnStartServer.Text = "DỪNG SERVER";
+            btnStartServer.BackColor = ThemeColors.Danger;
+        }
     }
 
     private ModernButton CreateSidebarButton(string text, string icon)
     {
-        var btn = new ModernButton { 
-            Text = text, 
-            Dock = DockStyle.Top, 
-            Height = 60, 
-            ForeColor = ThemeColors.TextSecondary, 
-            BackColor = ThemeColors.SidebarBackground, 
-            Font = ThemeColors.TitleFont,
-            Padding = new Padding(25, 0, 0, 0) 
+        return new ModernButton { 
+            Text = text, Dock = DockStyle.Top, Height = 60, 
+            ForeColor = ThemeColors.TextSecondary, BackColor = ThemeColors.SidebarBackground, 
+            Font = ThemeColors.TitleFont, Padding = new Padding(25, 0, 0, 0) 
         };
-        return btn;
+    }
+    
+    private ModernButton CreateModernButton(string text, Color backColor, int width, int height) {
+        return new ModernButton { 
+            Text = text, Width = width, Height = height, 
+            BackColor = backColor, ForeColor = Color.White, Dock = DockStyle.Fill,
+            Font = new Font("Segoe UI", 10F, FontStyle.Bold)
+        };
     }
 
     private void SwitchView(UserControl view, ModernButton activeButton)
     {
-        // View Transition Animation logic
         _opacity = 0;
         _fadeTimer.Start();
-
-        // Update sidebar buttons visual state
         ApplyThemeSidebar();
-
-        // Active style over the themed base
         activeButton.BackColor = ThemeColors.SidebarButtonActive;
         activeButton.ForeColor = ThemeColors.TextAccent;
         
@@ -217,7 +314,6 @@ public partial class MainForm : Form
         this.BackColor = ThemeColors.WindowBackground;
         this.ForeColor = ThemeColors.TextPrimary;
         
-        // Header & Sidebar
         foreach (Control c in this.Controls) {
             if (c is Panel p && p.Dock == DockStyle.Top) p.BackColor = ThemeColors.SidebarBackground;
         }
@@ -253,8 +349,6 @@ public partial class MainForm : Form
                 System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{path}\"");
             } else if (Directory.Exists(path)) {
                 System.Diagnostics.Process.Start("explorer.exe", $"\"{path}\"");
-            } else {
-                MessageBox.Show("Không tìm thấy đường dẫn tại đĩa!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }

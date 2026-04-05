@@ -12,7 +12,7 @@ public interface IAesCryptography
     void EncryptFile(string inputFile, string outputFile, string password, AesKeySize keySize = AesKeySize.AES256);
     void DecryptFile(string inputFile, string outputFile, string password);
 
-    Task EncryptStreamAsync(Stream input, Stream output, string password, AesKeySize keySize = AesKeySize.AES256, CancellationToken ct = default);
+    Task EncryptStreamAsync(Stream input, Stream output, string password, string fileName = "data", AesKeySize keySize = AesKeySize.AES256, CancellationToken ct = default);
     Task DecryptStreamAsync(Stream input, Stream output, string password, CancellationToken ct = default);
 }
 
@@ -40,16 +40,16 @@ public class AesCryptographyService : IAesCryptography
     /// Encrypt stream with specified AES key size.
     /// Handles large files efficiently using streaming.
     /// </summary>
-    public async Task EncryptStreamAsync(Stream input, Stream output, string password, AesKeySize keySize = AesKeySize.AES256, CancellationToken ct = default)
+    public async Task EncryptStreamAsync(Stream input, Stream output, string password, string fileName = "data", AesKeySize keySize = AesKeySize.AES256, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(password);
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(output);
 
-        // 1. Create metadata
+        // 1. Create metadata - lưu tên file gốc để restore sau khi giải mã
         var metadata = new FileMetadata
         {
-            FileName = Path.GetFileName("data"),  // Generic name for security
+            FileName = Path.GetFileName(fileName),
             FileSize = input.Length > 0 ? input.Length : 0,
             Sha256Hash = "",  // Will compute after encryption
             EncryptionType = keySize
@@ -200,20 +200,35 @@ public class AesCryptographyService : IAesCryptography
         byte[] hmacComputed = CryptographyProvider.ComputeHmacSha256(dataToVerify, hmacKey);
 
         if (!ConstantTimeEquals(hmacComputed, hmacReceived))
-            throw new CryptographicException("Security error: Incorrect password or data was tampered with");
+            throw new CryptographicException("Lỗi phân giải HMAC: Mật khẩu không đúng hoặc tệp dữ liệu đã bị biến đổi/sứt mẻ trong quá trình truyền.");
 
-        // 7. Decrypt data
+        // 7. Decrypt data in chunks (streaming)
         var aes = AesCipherFactory.CreateAes(aesKey, metadata.EncryptionType);
         var cbcMode = new CbcModeOperations(aes, iv);
 
-        byte[] encryptedData = new byte[encryptedDataLength];
-        await input.ReadExactlyAsync(encryptedData, 0, (int)encryptedDataLength, ct);
+        long processed = 0;
+        byte[] buffer = new byte[BUFFER_SIZE];
 
-        byte[] plaintext = cbcMode.DecryptRaw(encryptedData);
-        plaintext = RemovePkcs7Padding(plaintext);
+        while (processed < encryptedDataLength)
+        {
+            // Read in chunks that are multiples of 16 bytes
+            int toRead = (int)Math.Min(BUFFER_SIZE, encryptedDataLength - processed);
+            await input.ReadExactlyAsync(buffer, 0, toRead, ct);
 
-        // 8. Write decrypted data
-        await output.WriteAsync(plaintext, 0, plaintext.Length, ct);
+            byte[] encryptedBlock = new byte[toRead];
+            Array.Copy(buffer, 0, encryptedBlock, 0, toRead);
+
+            byte[] decrypted = cbcMode.DecryptRaw(encryptedBlock);
+
+            if (processed + toRead == encryptedDataLength)
+            {
+                // Last block - remove PKCS7 padding
+                decrypted = RemovePkcs7Padding(decrypted);
+            }
+
+            await output.WriteAsync(decrypted, 0, decrypted.Length, ct);
+            processed += toRead;
+        }
     }
 
     /// <summary>
@@ -227,7 +242,7 @@ public class AesCryptographyService : IAesCryptography
 
         using var fsIn = new FileStream(inputFile, FileMode.Open, FileAccess.Read);
         using var fsOut = new FileStream(outputFile, FileMode.Create, FileAccess.Write);
-        EncryptStreamAsync(fsIn, fsOut, password, keySize).GetAwaiter().GetResult();
+        EncryptStreamAsync(fsIn, fsOut, password, fileName: Path.GetFileName(inputFile), keySize: keySize).GetAwaiter().GetResult();
     }
 
     /// <summary>

@@ -15,28 +15,38 @@ static class Program
     [STAThread]
     static void Main()
     {
-        ApplicationConfiguration.Initialize();
+        try
+        {
+            ApplicationConfiguration.Initialize();
 
-        var host = Host.CreateDefaultBuilder()
-            .ConfigureAppConfiguration((context, config) => {
-                config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
-            })
-            .ConfigureServices((context, services) => {
-                services.Configure<AppConfig>(context.Configuration.GetSection("AppConfig"));
-                
-                services.AddSingleton<IAesCryptography, AesCryptographyService>();
-                services.AddSingleton<ITcpClient, TcpSender>();
-                services.AddSingleton<ITcpServer, TcpReceiver>();
-                services.AddSingleton<DatabaseService>();
-                services.AddSingleton<FileTransferManager>();
-                services.AddSingleton<MainForm>(sp => new MainForm(
-                    sp.GetRequiredService<FileTransferManager>(),
-                    sp.GetRequiredService<IOptions<AppConfig>>()
-                ));
-            })
-            .Build();
+            var host = Host.CreateDefaultBuilder()
+                .ConfigureAppConfiguration((context, config) => {
+                    config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
+                })
+                .ConfigureServices((context, services) => {
+                    services.Configure<AppConfig>(context.Configuration.GetSection("AppConfig"));
+                    
+                    services.AddSingleton<IAesCryptography, AesCryptographyService>();
+                    services.AddSingleton<HubTcpClient>();
+                    services.AddSingleton<CentralHubServer>();
+                    services.AddSingleton<DatabaseService>();
+                    services.AddSingleton<FileTransferManager>();
+                    services.AddSingleton<MainForm>(sp => new MainForm(
+                        sp.GetRequiredService<FileTransferManager>(),
+                        sp.GetRequiredService<HubTcpClient>(),
+                        sp.GetRequiredService<CentralHubServer>(),
+                        sp.GetRequiredService<IOptions<AppConfig>>()
+                    ));
+                })
+                .Build();
 
-        var mainForm = host.Services.GetRequiredService<MainForm>();
-        Application.Run(mainForm);
+            var mainForm = host.Services.GetRequiredService<MainForm>();
+            Application.Run(mainForm);
+        }
+        catch (Exception ex)
+        {
+            File.WriteAllText("crashlog.txt", ex.ToString());
+            throw;
+        }
     }
 }

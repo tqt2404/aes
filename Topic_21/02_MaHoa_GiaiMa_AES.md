@@ -8,6 +8,7 @@
 - Hệ AES: Cơ chế Cipher Block Chaining (`CBC`), đệm chuẩn `PKCS7`.
 - Tiêu chuẩn KDF (Key Derivation Function): Áp dụng `Rfc2898DeriveBytes` (PBKDF2) chạy vòng lặp 100,000 lần (Iterations) để đúc thành AES Key (32 bytes) và HMAC Key (32 bytes) từ Mật khẩu (String) do người dùng chọn.
 - Randomness: Sinh ngẫu nhiên `Salt (16 bytes)` và `IV (16 bytes)` cho mọi phiên mã hóa.
+aes bắt buộc viết từ đầu không được dùng thư viện có sẵn
 
 **3. Quy trình Mã khóa Tối ưu 1-Pass (Zero-Temp-File):**
 - Định dạng Tệp Mã hóa Đầu ra (Tension Format):

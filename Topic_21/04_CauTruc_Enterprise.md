@@ -1,40 +1,152 @@
-# Kiến trúc Ứng dụng Bền Vững (Clean Architecture/DI)
+# Kiến Trúc Ứng Dụng – Clean Architecture & Dependency Injection
 
-**1. Tổng Quan Kiến Trúc Nền Tảng:**
-Dự án `SecureFileTransfer` phải được kiến thiết theo mô thức Hướng Dịch vụ (Micro-Layer/Service). Bằng Dependency Injection, Mạng (Network) và Bảo mật (AES) là hai bánh răng hoán đổi dễ dàng mà lớp Giao diện không can thiệp sát vách. Code được làm sạch (Clean Code) 100% nhờ Extract Method và các luồng Guard Clauses.
+## 1. Tổng Quan
 
-**2. Sơ đồ Directory Layout:**
+`SecureFileTransfer` được tổ chức theo mô hình **Layered Clean Architecture** kết hợp **Microsoft.Extensions.DependencyInjection**. Mạng (Network) và Bảo mật (Security) là hai lớp hoàn toàn tách biệt, giao tiếp với nhau qua Orchestrator (`FileTransferManager`) – không bao giờ phụ thuộc chéo.
+
+```
+┌─────────────────────────────────────────────────┐
+│  UI Layer  (WinForms)                           │
+│  MainForm → SenderView / ReceiverView           │
+└────────────────────┬────────────────────────────┘
+                     │ injects
+┌────────────────────▼────────────────────────────┐
+│  Orchestration Layer                            │
+│  FileTransferManager                            │
+└─────────┬────────────────┬───────────────────────┘
+          │                │ injects
+┌─────────▼──────┐ ┌───────▼──────────────────────┐
+│ Security Layer │ │ Network Layer                 │
+│ IAesCryptography│ │ HubTcpClient                 │
+│ AesCryptography │ │ CentralHubServer             │
+│ Service         │ │ NetworkMessage               │
+└────────────────┘ └──────────────────────────────┘
+```
+
+---
+
+## 2. Directory Layout Thực Tế
 
 ```text
 src/
-├── Models/                 # DTOs
-│   ├── FileMetadata.cs     # Metadata đóng gói JSON (FileName, Size, SHA-256 Integrity)
-│   └── TransferProgress.cs # Báo cáo % và Tốc độ Kbps
+├── Models/
+│   ├── Models.cs           # FileMetadata, TransferProgress, AesKeySize, TransferState
+│   └── AppConfig.cs        # Cấu hình appsettings.json (VaultPath, ServerPort...)
 │
-├── Security/               # Phân Hệ Cryptography 
-│   ├── IAesCryptography.cs # Hợp đồng Thuật toán
-│   └── AesService.cs       # Luồng Zero-Temp-File HMAC, ngắt khối phương thức sạch sẽ
+├── Security/
+│   ├── AesCryptographyService.cs   # Orchestrate encrypt/decrypt (HMAC + PBKDF2 + AES-CBC)
+│   ├── Aes256CoreImpl.cs           # Tự cài đặt AES từ đầu (S-Box, FIPS-197)
+│   ├── AesCipherFactory.cs         # Factory tạo IAes theo AesKeySize
+│   ├── CbcModeOperations.cs        # CBC chaining (XOR + EncryptRaw/DecryptRaw)
+│   └── CryptographyProvider.cs     # PBKDF2, RandomBytes wrapper
 │
-├── Network/                # Phân Hệ TCP Sockets
-│   ├── ITcpClient.cs       
-│   ├── ITcpServer.cs       
-│   ├── TcpSender.cs        # (Chứa Guard Clauses kiểm soát Input dòng đầu tiên)
-│   └── TcpReceiver.cs      
+├── Network/
+│   ├── NetworkMessage.cs           # Frame protocol (Command + SenderName + Payload)
+│   ├── CentralHubServer.cs         # Hub server: route frames giữa các clients
+│   └── HubTcpClient.cs             # Client: kết nối Hub, send/receive frames
 │
-├── Services/               # Nhạc trưởng (Orchestrator) 
-│   └── FileTransferManager.cs # Tích hợp DI truyền khối data liên ngành
+├── Services/
+│   ├── FileTransferManager.cs      # Orchestrator: ghép Security + Network + UI events
+│   │   └── HubChunkStream          # Stream adapter: Write → SendFileChunkAsync
+│   └── DatabaseService.cs          # SQLite log lịch sử truyền file
 │
-├── Utils/                  # Cụm Thư Viện Mini
-│   ├── Logger.cs           
-│   └── HashHelper.cs       # Hỗ trợ tính băm SHA-256 trên tầng logic Application
+├── Utils/
+│   ├── Helpers.cs                  # HashHelper (SHA-256), InputValidator
+│   └── InputValidator.cs           # Guard Clauses dùng chung
 │
-└── UI/                     # Presentation Layer
-    └── MainForm.cs         # Pattern Matching kiểm soát UI và Event Handlers
+├── UI/
+│   ├── MainForm.cs                 # Shell: sidebar nav, progress bar, log panel
+│   ├── UserControls/
+│   │   ├── SenderView.cs           # UI gửi file (chọn file, pass, key size, user đích)
+│   │   ├── ReceiverView.cs         # UI nhận + giải mã file
+│   │   └── ModernUIComponents.cs   # ModernButton, ModernProgressBar
+│   └── Styles/
+│       └── ThemeColors.cs          # Light/Dark theme tokens
+│
+├── Program.cs                      # Entry point: Host + DI container setup
+├── appsettings.json                # Cấu hình môi trường
+└── SecureFileTransfer.csproj
 ```
 
-**3. Tiêu chí Bảo Mật Toàn Vẹn Cấp Độ Cao Hết Cỡ (Dual-Layer Integrity):**
-- Hiệu suất Vận hành: Cấu trúc 1-pass (Zero-Temp) cho hiệu năng Disk I/O cao gấp 3 lần bình thường do không nén file đệm. Phù hợp Transfer tệp hàng Gigabyte.
-- **Tầng Băng thông AES:** 
-  + Thả băm **HMAC-SHA256** xuống tận cùng khối tập tin (.enc) (EOF). Bảo chứng tuyệt đối luồng byte nguyên hiện trạng, không xô lệch 1-bit. Thuộc mô hình Anti-Tamper.
-- **Tầng Logic File:** 
-  + Trích xuất băm **SHA-256 Hash Gốc** đính vào tệp JSON cấp Server. Người nhận bung ngược ra so lại để tin tưởng 1000% rác hay lỗi quá trình download không làm rách file của họ.
+---
+
+## 3. Dependency Injection Container (Program.cs)
+
+```csharp
+Host.CreateDefaultBuilder()
+    .ConfigureServices((ctx, services) => {
+        services.Configure<AppConfig>(ctx.Configuration.GetSection("AppConfig"));
+
+        // Security
+        services.AddSingleton<IAesCryptography, AesCryptographyService>();
+
+        // Network
+        services.AddSingleton<HubTcpClient>();
+        services.AddSingleton<CentralHubServer>();
+
+        // Data
+        services.AddSingleton<DatabaseService>();
+
+        // Orchestration
+        services.AddSingleton<FileTransferManager>();
+
+        // UI
+        services.AddSingleton<MainForm>(sp => new MainForm(
+            sp.GetRequiredService<FileTransferManager>(),
+            sp.GetRequiredService<HubTcpClient>(),
+            sp.GetRequiredService<CentralHubServer>(),
+            sp.GetRequiredService<IOptions<AppConfig>>()
+        ));
+    });
+```
+
+Toàn bộ singleton → đảm bảo một `HubTcpClient` duy nhất, một `CentralHubServer` duy nhất, không leak connection.
+
+---
+
+## 4. Bảo Mật Đa Tầng (Dual-Layer Security)
+
+### Tầng 1 – HMAC-SHA256 (Integrity của Ciphertext)
+
+```
+Scope bảo vệ: [MetaLen][Metadata][Salt][IV][Ciphertext] ← toàn bộ
+              └───────────────────────────────────────────┘
+                              HMAC-SHA256 (32B ở EOF)
+```
+
+- Detect giả mạo / lỗi đường truyền ở mức **byte-for-byte**
+- Dùng mô hình **Encrypt-then-MAC** → không bao giờ decrypt nếu MAC fail
+- So sánh **constant-time** (`ConstantTimeEquals`) → miễn nhiễm timing attack
+
+### Tầng 2 – SHA-256 (Integrity của Plaintext gốc)
+
+```
+Sender: hash = SHA256(original_file)     → ghi vào FileMetadata.Sha256Hash
+Receiver: SHA256(decrypted_file) == hash → VerifyIntegrityAsync()
+```
+
+- Xác nhận file sau giải mã **byte-for-byte khớp** với file gốc trước mã hóa
+- Phát hiện lỗi không phải do giả mạo mà do disk/network corruption
+
+### Tầng 3 – Giới Hạn Đầu Vào (DoS / OOM Protection)
+
+| Cơ chế | Giá trị | Vị trí |
+|---|---|---|
+| Payload chunk tối đa | 50 MB | `NetworkMessage.MaxPayloadLength` |
+| String (tên file) tối đa | 1024 bytes | `NetworkMessage.MaxStringLength` |
+| Metadata JSON tối đa | 4096 bytes | `AesCryptographyService.DecryptStreamAsync` |
+| Tổng bytes nhận/session | `FileSize × 1.1`, hard cap 2 GB | `FileTransferManager.MaxSessionBytes` |
+
+---
+
+## 5. Nguyên Tắc Clean Code Áp Dụng
+
+| Nguyên tắc | Biểu hiện trong code |
+|---|---|
+| **Guard Clauses** | `ArgumentException.ThrowIfNullOrWhiteSpace`, `ArgumentNullException.ThrowIfNull` ở đầu mọi public method |
+| **Single Responsibility** | Network / Security / UI không chạm nhau trực tiếp |
+| **Interface Segregation** | `IAesCryptography` – UI chỉ biết interface, không biết `Aes256CoreImpl` |
+| **Dependency Inversion** | `FileTransferManager` nhận `IAesCryptography` qua constructor, không `new` trực tiếp |
+| **`using` / `IDisposable`** | Toàn bộ `Stream`, `TcpClient`, `SemaphoreSlim` đều `Dispose` đúng lúc |
+| **Async-all-the-way** | `async Task` xuyên suốt từ UI đến `NetworkStream.ReadAsync` |
+| **Không ghi plaintext** | Hub chỉ relay bytes mã hóa, Vault chỉ lưu `.enc` cho đến khi user chủ động giải mã |

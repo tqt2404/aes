@@ -75,68 +75,55 @@ public class AesCryptographyService : IAesCryptography
         var aes = AesCipherFactory.CreateAes(aesKey, keySize);
         var cbcMode = new CbcModeOperations(aes, iv);
 
-        // 5. Write metadata header
+        // 5. Write metadata header + start incremental HMAC computation
         byte[] metadataLengthBytes = BitConverter.GetBytes(metadataJson.Length);
         if (BitConverter.IsLittleEndian) Array.Reverse(metadataLengthBytes);
+
+        // Initialize HMAC to cover ALL bytes written to the output (header + ciphertext)
+        using var hmac = new System.Security.Cryptography.HMACSHA256(hmacKey);
+        hmac.TransformBlock(metadataLengthBytes, 0, METADATA_LENGTH_SIZE, null, 0);
+        hmac.TransformBlock(metadataJson, 0, metadataJson.Length, null, 0);
+        hmac.TransformBlock(salt, 0, SALT_SIZE, null, 0);
+        hmac.TransformBlock(iv, 0, IV_SIZE, null, 0);
+
         await output.WriteAsync(metadataLengthBytes, 0, METADATA_LENGTH_SIZE, ct);
         await output.WriteAsync(metadataJson, 0, metadataJson.Length, ct);
-
-        // 6. Write salt and IV
         await output.WriteAsync(salt, 0, SALT_SIZE, ct);
         await output.WriteAsync(iv, 0, IV_SIZE, ct);
 
-        // 7. Encrypt data in chunks (streaming) - use raw mode for full chunks, padding only for final
+        // 6. Encrypt data in chunks, feeding each encrypted chunk into HMAC
         byte[] buffer = new byte[BUFFER_SIZE];
         int read;
-
-        // Accumulate for encryption
         List<byte> allData = new();
 
         while ((read = await input.ReadAsync(buffer, 0, buffer.Length, ct)) > 0)
         {
             allData.AddRange(buffer.Take(read));
 
-            // Process full BLOCK_SIZE units without padding (streaming blocks)
-            int fullBlocks = (allData.Count / 16) * 16;  // Round down to BLOCK_SIZE
+            int fullBlocks = (allData.Count / 16) * 16;
             if (fullBlocks > 0)
             {
                 byte[] chunk = allData.Take(fullBlocks).ToArray();
                 byte[] encrypted = cbcMode.EncryptRaw(chunk);
+                // Hash the ciphertext chunk
+                hmac.TransformBlock(encrypted, 0, encrypted.Length, null, 0);
                 await output.WriteAsync(encrypted, 0, encrypted.Length, ct);
                 allData.RemoveRange(0, fullBlocks);
             }
         }
 
-        // 8. Encrypt remaining data with PKCS7 padding (final block)
-        if (allData.Count > 0)
+        // 7. Final block with PKCS7 padding
         {
-            byte[] finalChunk = allData.ToArray();
+            byte[] finalChunk = allData.Count > 0 ? allData.ToArray() : Array.Empty<byte>();
             byte[] paddedFinal = AddPkcs7Padding(finalChunk);
             byte[] encrypted = cbcMode.EncryptRaw(paddedFinal);
-            await output.WriteAsync(encrypted, 0, encrypted.Length, ct);
-        }
-        else
-        {
-            // Even if no data, we need a padding block (empty file case)
-            byte[] paddedFinal = AddPkcs7Padding(new byte[0]);  // Produces 16 bytes of 0x10
-            byte[] encrypted = cbcMode.EncryptRaw(paddedFinal);
+            hmac.TransformBlock(encrypted, 0, encrypted.Length, null, 0);
             await output.WriteAsync(encrypted, 0, encrypted.Length, ct);
         }
 
-        // 9. Compute HMAC over metadata + salt + IV + encrypted data
-        byte[] header = new byte[METADATA_LENGTH_SIZE + metadataJson.Length + SALT_SIZE + IV_SIZE];
-        int offset = 0;
-        Array.Copy(metadataLengthBytes, 0, header, offset, METADATA_LENGTH_SIZE);
-        offset += METADATA_LENGTH_SIZE;
-        Array.Copy(metadataJson, 0, header, offset, metadataJson.Length);
-        offset += metadataJson.Length;
-        Array.Copy(salt, 0, header, offset, SALT_SIZE);
-        offset += SALT_SIZE;
-        Array.Copy(iv, 0, header, offset, IV_SIZE);
-
-        // We need to compute HMAC over all data before writing it
-        // For now, write HMAC of header + read back encrypted data
-        byte[] finalHmac = CryptographyProvider.ComputeHmacSha256(header, hmacKey);
+        // 8. Finalize HMAC and write at the end
+        hmac.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        byte[] finalHmac = hmac.Hash!;
         await output.WriteAsync(finalHmac, 0, HMAC_SIZE, ct);
     }
 
@@ -189,20 +176,40 @@ public class AesCryptographyService : IAesCryptography
         Array.Copy(derivedBytes, 0, aesKey, 0, keyLength);
         Array.Copy(derivedBytes, keyLength, hmacKey, 0, 32);
 
-        // 6. Verify HMAC
-        input.Seek(0, SeekOrigin.Begin);
+        // 6. Verify HMAC - phải tính trên Header + toàn bộ Ciphertext (1-pass)
         long encryptedDataStart = METADATA_LENGTH_SIZE + metadataLength + SALT_SIZE + IV_SIZE;
         long encryptedDataLength = totalLength - HMAC_SIZE - encryptedDataStart;
 
-        byte[] dataToVerify = new byte[encryptedDataStart];
-        await input.ReadExactlyAsync(dataToVerify, 0, (int)encryptedDataStart, ct);
+        // Giữ lại original metadataLengthBytes để đưa vào HMAC
+        byte[] metadataLengthBytesForHmac = new byte[METADATA_LENGTH_SIZE];
+        input.Seek(0, SeekOrigin.Begin);
+        await input.ReadExactlyAsync(metadataLengthBytesForHmac, 0, METADATA_LENGTH_SIZE, ct);
 
-        byte[] hmacComputed = CryptographyProvider.ComputeHmacSha256(dataToVerify, hmacKey);
+        using var hmacVerify = new System.Security.Cryptography.HMACSHA256(hmacKey);
+        hmacVerify.TransformBlock(metadataLengthBytesForHmac, 0, METADATA_LENGTH_SIZE, null, 0);
+        hmacVerify.TransformBlock(metadataJson, 0, metadataLength, null, 0);
+        hmacVerify.TransformBlock(salt, 0, SALT_SIZE, null, 0);
+        hmacVerify.TransformBlock(iv, 0, IV_SIZE, null, 0);
+
+        // Seek tới đầu ciphertext rồi mới đọc để hash
+        input.Seek(encryptedDataStart, SeekOrigin.Begin);
+        byte[] hmacBuf = new byte[BUFFER_SIZE];
+        long remaining = encryptedDataLength;
+        while (remaining > 0)
+        {
+            int toRead = (int)Math.Min(BUFFER_SIZE, remaining);
+            await input.ReadExactlyAsync(hmacBuf, 0, toRead, ct);
+            hmacVerify.TransformBlock(hmacBuf, 0, toRead, null, 0);
+            remaining -= toRead;
+        }
+        hmacVerify.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        byte[] hmacComputed = hmacVerify.Hash!;
 
         if (!ConstantTimeEquals(hmacComputed, hmacReceived))
             throw new CryptographicException("Lỗi phân giải HMAC: Mật khẩu không đúng hoặc tệp dữ liệu đã bị biến đổi/sứt mẻ trong quá trình truyền.");
 
-        // 7. Decrypt data in chunks (streaming)
+        // 7. Seek back to start of ciphertext and decrypt
+        input.Seek(encryptedDataStart, SeekOrigin.Begin);
         var aes = AesCipherFactory.CreateAes(aesKey, metadata.EncryptionType);
         var cbcMode = new CbcModeOperations(aes, iv);
 
@@ -211,7 +218,6 @@ public class AesCryptographyService : IAesCryptography
 
         while (processed < encryptedDataLength)
         {
-            // Read in chunks that are multiples of 16 bytes
             int toRead = (int)Math.Min(BUFFER_SIZE, encryptedDataLength - processed);
             await input.ReadExactlyAsync(buffer, 0, toRead, ct);
 
@@ -221,10 +227,7 @@ public class AesCryptographyService : IAesCryptography
             byte[] decrypted = cbcMode.DecryptRaw(encryptedBlock);
 
             if (processed + toRead == encryptedDataLength)
-            {
-                // Last block - remove PKCS7 padding
                 decrypted = RemovePkcs7Padding(decrypted);
-            }
 
             await output.WriteAsync(decrypted, 0, decrypted.Length, ct);
             processed += toRead;

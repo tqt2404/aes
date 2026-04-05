@@ -14,12 +14,12 @@ public class AesCipherFactory
     /// <summary>
     /// Create AES cipher instance with specified key size.
     /// Validates key length matches the requested AES variant.
-    /// Uses Aes256CoreImpl - complete custom AES-256 implementation from scratch (FIPS 197).
+    /// Uses AesCoreImpl - complete custom AES implementation from scratch (FIPS 197).
     /// </summary>
     /// <param name="key">Encryption key (must be 16, 24, or 32 bytes)</param>
     /// <param name="keySize">AES variant (128, 192, or 256-bit)</param>
     /// <returns>Initialized AES cipher instance</returns>
-    public static Aes256CoreImpl CreateAes(byte[] key, AesKeySize keySize)
+    public static AesCoreImpl CreateAes(byte[] key, AesKeySize keySize)
     {
         ArgumentNullException.ThrowIfNull(key);
 
@@ -36,9 +36,9 @@ public class AesCipherFactory
                 $"Key size mismatch: expected {expectedKeyLength} bytes for {keySize}, got {key.Length} bytes",
                 nameof(key));
 
-        // Use Aes256CoreImpl - fully custom AES implementation from scratch (FIPS 197)
+        // Use AesCoreImpl - fully custom AES implementation from scratch (FIPS 197)
         // Supports AES-128 (Nk=4, Nr=10), AES-192 (Nk=6, Nr=12), AES-256 (Nk=8, Nr=14) automatically based on key length
-        return new Aes256CoreImpl(key);
+        return new AesCoreImpl(key);
     }
 
     /// <summary>

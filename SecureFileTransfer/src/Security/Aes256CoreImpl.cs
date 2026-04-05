@@ -11,7 +11,7 @@ namespace SecureFileTransfer.Security;
 /// For academic integrity: This implementation is written entirely from scratch and satisfies
 /// the requirement to implement AES without using framework libraries.
 /// </summary>
-public class Aes256CoreImpl
+public class AesCoreImpl
 {
     // ===== Static Lookup Tables (FIPS 197) =====
     
@@ -192,7 +192,7 @@ public class Aes256CoreImpl
     /// Initialize AES cipher with the given master key.
     /// Supports AES-128 (16 bytes), AES-192 (24 bytes), AES-256 (32 bytes).
     /// </summary>
-    public Aes256CoreImpl(byte[] keyBytes)
+    public AesCoreImpl(byte[] keyBytes)
     {
         ArgumentNullException.ThrowIfNull(keyBytes);
 

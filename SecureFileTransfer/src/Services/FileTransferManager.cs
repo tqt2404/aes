@@ -30,6 +30,10 @@ public class FileTransferManager
     public event Action<FileMetadata>? OnTransferInitReceived;
     public event Action<string>? OnEncryptedFileReady;
 
+    // Session protection: maximum bytes receivable per transfer session
+    // Capped at 2GB; also enforced per-session based on metadata.FileSize
+    private const long MaxSessionBytes = 2L * 1024 * 1024 * 1024;
+
     public FileTransferManager(IAesCryptography crypto, DatabaseService db)
     {
         _crypto = crypto;
@@ -136,6 +140,25 @@ public class FileTransferManager
             }
             else if (_receivingStream != null)
             {
+                // === SESSION BYTE CAP: Chống Chunk Flooding Attack ===
+                // Tính ngưỡng cho phép: FileSize đã khai báo + 10% dung sai overhead
+                long allowedMax = CurrentIncomingMetadata != null
+                    ? (long)(CurrentIncomingMetadata.FileSize * 1.1)
+                    : MaxSessionBytes;
+                allowedMax = Math.Min(allowedMax, MaxSessionBytes); // Hard cap tuyệt đối 2GB
+
+                if (_receivedBytes + msg.PayloadLength > allowedMax)
+                {
+                    Logger.Log($"[Security] Session bị huỷ: nhận vượt quá giới hạn ({_receivedBytes + msg.PayloadLength} > {allowedMax} bytes). Có thể bị tấn công flooding.");
+                    _receivingStream?.Dispose();
+                    _receivingStream = null;
+                    if (TempReceivingPath != null && File.Exists(TempReceivingPath))
+                        File.Delete(TempReceivingPath);
+                    TempReceivingPath = null;
+                    CurrentIncomingMetadata = null;
+                    return;
+                }
+
                 _receivingStream.Write(msg.Payload, 0, msg.PayloadLength);
                 _receivedBytes += msg.PayloadLength;
                 

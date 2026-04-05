@@ -25,7 +25,7 @@ public class NetworkMessage
     public byte[] Payload { get; set; } = Array.Empty<byte>();
 
     // Protective limits to prevent memory overflow from bad data
-    private const int MaxStringLength = 256;
+    private const int MaxStringLength = 1024;
     private const int MaxPayloadLength = 50 * 1024 * 1024; // 50MB reasonable single chunk limit
 
     public async Task WriteToStreamAsync(NetworkStream stream, CancellationToken cancellationToken = default)

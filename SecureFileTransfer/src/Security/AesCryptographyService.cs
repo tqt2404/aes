@@ -151,6 +151,9 @@ public class AesCryptographyService : IAesCryptography
         int metadataLength = BitConverter.ToInt32(metadataLengthBytes, 0);
 
         // 2. Read and deserialize metadata
+        if (metadataLength <= 0 || metadataLength > 4096)
+            throw new CryptographicException($"Invalid metadata length: {metadataLength}. Expected 1–4096 bytes.");
+
         byte[] metadataJson = new byte[metadataLength];
         await input.ReadExactlyAsync(metadataJson, 0, metadataLength, ct);
         var metadata = FileMetadata.Deserialize(metadataJson);

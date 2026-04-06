@@ -28,7 +28,7 @@ public class SenderView : UserControl
     private TextBox txtKey = default!;
     private ComboBox cmbAesSize = default!;
     private Label lblFileName = default!;
-    private ModernButton btnSelectFile = default!, btnSend = default!, btnEncryptOnly = default!;
+    private ModernButton btnSelectFile = default!, btnSend = default!;
 
     public SenderView(FileTransferManager manager, HubTcpClient hubClient, AppConfig config)
     {
@@ -135,11 +135,7 @@ public class SenderView : UserControl
         btnSend.Font = ThemeColors.TitleFont;
         btnSend.Click += async (s, e) => await SendActionAsync();
         
-        btnEncryptOnly = CreateModernButton("CHỈ MÃ HÓA LƯU TRỮ", ThemeColors.ButtonSecondary, 260, 50);
-        btnEncryptOnly.Click += async (s, e) => await EncryptLocalActionAsync();
-
         pnlActions.Controls.Add(btnSend);
-        pnlActions.Controls.Add(btnEncryptOnly);
         layout.Controls.Add(pnlActions, 0, 2);
 
         this.AllowDrop = true;
@@ -201,9 +197,6 @@ public class SenderView : UserControl
         finally { SetLoading(false); }
     }
 
-    private async Task EncryptLocalActionAsync() {
-        // [Omitting for brevity, keeps original local logic just in case]
-    }
 
     private bool ValidateInputs() {
         string key = txtKey.Text.Trim();
@@ -216,7 +209,6 @@ public class SenderView : UserControl
 
     private void SetLoading(bool isLoading) {
         btnSend.Enabled = !isLoading;
-        btnEncryptOnly.Enabled = !isLoading;
         btnSelectFile.Enabled = !isLoading;
     }
 

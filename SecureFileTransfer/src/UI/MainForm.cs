@@ -133,6 +133,7 @@ public partial class MainForm : Form
                 {
                     _isServerRunning = true;
                     _ = _hubServer.StartAsync();
+                    await _hubServer.WaitForStartAsync(); // Đợi Server thực sự mở port
                     txtIp.Text = "127.0.0.1"; // auto connect to self
                     btnStartServer.Text = "DỪNG SERVER";
                     btnStartServer.BackColor = ThemeColors.Danger;

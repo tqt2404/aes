@@ -64,7 +64,11 @@ public class SenderView : UserControl
             else action();
         }
         else {
-            try { action(); } catch { } 
+            // Nếu chưa có handle, đợi khi handle được tạo xong mới thực hiện
+            this.HandleCreated += (s, e) => {
+                if (this.InvokeRequired) this.Invoke(action);
+                else action();
+            };
         }
     }
 

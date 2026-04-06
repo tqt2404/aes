@@ -38,21 +38,27 @@ public class CentralHubServer
     private TcpListener? _listener;
     private readonly ConcurrentDictionary<string, ClientSession> _connectedClients = new();
     private CancellationTokenSource? _cts;
+    private TaskCompletionSource<bool> _startupTcs = new();
 
     public CentralHubServer(int port = 5000)
     {
         _port = port;
     }
 
+    public Task WaitForStartAsync() => _startupTcs.Task;
+
     public async Task StartAsync()
     {
         _cts = new CancellationTokenSource();
-        _listener = new TcpListener(IPAddress.Any, _port);
-        _listener.Start();
-        Logger.Log($"[Server Hub] Đang chạy trên port {_port}...");
-
+        _startupTcs = new TaskCompletionSource<bool>();
+        
         try
         {
+            _listener = new TcpListener(IPAddress.Any, _port);
+            _listener.Start();
+            Logger.Log($"[Server Hub] Đang chạy trên port {_port}...");
+            _startupTcs.TrySetResult(true);
+
             while (!_cts.Token.IsCancellationRequested)
             {
                 TcpClient client = await _listener.AcceptTcpClientAsync(_cts.Token);
@@ -63,6 +69,7 @@ public class CentralHubServer
         catch (Exception ex)
         {
             Logger.Log($"[Server Hub] Lỗi khởi động: {ex.Message}");
+            _startupTcs.TrySetException(ex);
         }
         finally
         {

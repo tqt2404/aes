@@ -275,7 +275,6 @@ public class AesCoreImpl
             byte[] temp = new byte[4];
             Array.Copy(w, (i - 1) * 4, temp, 0, 4);
 
-            // CRITICAL: This condition handles 256-bit keys
             if (i % Nk == 0)
             {
                 temp = SubWord(RotWord(temp));
@@ -283,8 +282,6 @@ public class AesCoreImpl
             }
             else if (Nk > 6 && i % Nk == 4)
             {
-                // This line is CRITICAL for AES-256 (when Nk=8)
-                // It applies SubWord to every 4th word after the first Nk words
                 temp = SubWord(temp);
             }
 

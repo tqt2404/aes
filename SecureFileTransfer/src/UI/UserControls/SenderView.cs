@@ -28,7 +28,7 @@ public class SenderView : UserControl
     private TextBox txtKey = default!;
     private ComboBox cmbAesSize = default!;
     private Label lblFileName = default!;
-    private ModernButton btnSelectFile = default!, btnSend = default!;
+    private ModernButton btnSelectFile = default!, btnSend = default!, btnEncryptLocal = default!;
 
     public SenderView(FileTransferManager manager, HubTcpClient hubClient, AppConfig config)
     {
@@ -136,6 +136,11 @@ public class SenderView : UserControl
         btnSend.Click += async (s, e) => await SendActionAsync();
         
         pnlActions.Controls.Add(btnSend);
+
+        btnEncryptLocal = CreateModernButton("LƯU CỤC BỘ", ThemeColors.ButtonSecondary, 260, 50);
+        btnEncryptLocal.Click += async (s, e) => await EncryptLocalActionAsync();
+        pnlActions.Controls.Add(btnEncryptLocal);
+
         layout.Controls.Add(pnlActions, 0, 2);
 
         this.AllowDrop = true;
@@ -197,6 +202,49 @@ public class SenderView : UserControl
         finally { SetLoading(false); }
     }
 
+    private async Task EncryptLocalActionAsync() 
+    {
+        if (string.IsNullOrEmpty(_selectedFile)) { ShowWarning("Chưa chọn tệp nguồn!"); return; }
+        string key = txtKey.Text.Trim();
+        if (string.IsNullOrEmpty(key) || key.Length < 8) { ShowWarning("Mật mã phải có ít nhất 8 ký tự!"); return; }
+
+        using SaveFileDialog sfd = new() 
+        {
+            Title = "Chọn nơi lưu tệp đã mã hóa",
+            Filter = "Encrypted files (*.enc)|*.enc|All files (*.*)|*.*",
+            FileName = Path.GetFileName(_selectedFile) + ".enc"
+        };
+
+        if (sfd.ShowDialog() != DialogResult.OK) 
+        {
+            // Người dùng hủy bỏ hoặc không chọn
+            return; 
+        }
+
+        string destPath = sfd.FileName;
+        if (string.IsNullOrEmpty(destPath)) 
+        { 
+            ShowWarning("Chưa chọn nơi lưu!"); 
+            return; 
+        }
+
+        try 
+        {
+            SetLoading(true);
+            var p = new Progress<TransferProgress>(pr => {
+                TransferProgressChanged?.Invoke((int)((pr.BytesTransferred * 100) / pr.TotalBytes), $"Đang mã hóa & lưu: {pr.BytesTransferred / 1024} KB / {pr.TotalBytes / 1024} KB");
+            });
+
+            AesKeySize keySize = cmbAesSize.SelectedIndex switch { 0 => AesKeySize.AES128, 1 => AesKeySize.AES192, _ => AesKeySize.AES256 };
+            
+            await _manager.EncryptLocalStorageAsync(_selectedFile, destPath, key, keySize, p);
+            
+            TransferProgressChanged?.Invoke(100, "Mã hóa và lưu cục bộ thành công.");
+            MessageBox.Show($"Đã mã hóa và lưu thành công tại:\n{destPath}", "Hoàn tất", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex) { HandleError("Lỗi Mã Hóa Cục Bộ", ex); }
+        finally { SetLoading(false); }
+    }
 
     private bool ValidateInputs() {
         string key = txtKey.Text.Trim();
@@ -209,6 +257,7 @@ public class SenderView : UserControl
 
     private void SetLoading(bool isLoading) {
         btnSend.Enabled = !isLoading;
+        btnEncryptLocal.Enabled = !isLoading;
         btnSelectFile.Enabled = !isLoading;
     }
 

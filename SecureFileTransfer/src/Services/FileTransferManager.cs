@@ -244,6 +244,78 @@ public class FileTransferManager
         return Path.GetFullPath(finalPath);
     }
 
+
+    public async Task EncryptLocalStorageAsync(string sourcePath, string destPath, string password, AesKeySize keySize = AesKeySize.AES256, IProgress<TransferProgress>? progress = null, CancellationToken ct = default)
+    {
+        ValidateFile(sourcePath);
+        
+        string fileName = Path.GetFileName(sourcePath);
+        long originalFileSize = new FileInfo(sourcePath).Length;
+        string hash = await HashHelper.ComputeSha256Async(sourcePath, ct);
+
+        // Ước tính kích thước bản mã (metadata + overhead) để báo cáo progress
+        long estimatedMetadataLen = 85; 
+        long encryptedSize = 4 + estimatedMetadataLen + 16 + 16 + ((originalFileSize / 16) + 1) * 16 + 32;
+
+        Logger.Log($"[Mã hóa Local] Đang xử lý: {fileName} -> {Path.GetFileName(destPath)}");
+
+        using var fsIn = new FileStream(sourcePath, FileMode.Open, FileAccess.Read);
+        using var fsOut = new FileStream(destPath, FileMode.Create, FileAccess.Write);
+        
+        using var progressStream = new ProgressWrappedStream(fsOut, progress, encryptedSize);
+        
+        await _crypto.EncryptStreamAsync(fsIn, progressStream, password, fileName, keySize, ct);
+        await progressStream.FlushAsync(ct);
+        
+        Logger.Log($"[Mã hóa Local] Đã lưu tệp được mã hóa tại: {destPath}");
+    }
+
+    private class ProgressWrappedStream : Stream
+    {
+        private readonly Stream _inner;
+        private readonly IProgress<TransferProgress>? _progress;
+        private readonly long _total;
+        private long _written;
+
+        public ProgressWrappedStream(Stream inner, IProgress<TransferProgress>? progress, long total)
+        {
+            _inner = inner;
+            _progress = progress;
+            _total = total;
+        }
+
+        public override async Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken ct)
+        {
+            await _inner.WriteAsync(buffer, offset, count, ct);
+            _written += count;
+            _progress?.Report(new TransferProgress { BytesTransferred = _written, TotalBytes = _total });
+        }
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+        {
+            await _inner.WriteAsync(buffer, ct);
+            _written += buffer.Length;
+            _progress?.Report(new TransferProgress { BytesTransferred = _written, TotalBytes = _total });
+        }
+
+        public override void Flush() => _inner.Flush();
+        public override Task FlushAsync(CancellationToken ct) => _inner.FlushAsync(ct);
+        public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
+        public override void SetLength(long value) => _inner.SetLength(value);
+        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+        public override bool CanRead => _inner.CanRead;
+        public override bool CanSeek => _inner.CanSeek;
+        public override bool CanWrite => _inner.CanWrite;
+        public override long Length => _inner.Length;
+        public override long Position { get => _inner.Position; set => _inner.Position = value; }
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            _inner.Write(buffer, offset, count);
+            _written += count;
+            _progress?.Report(new TransferProgress { BytesTransferred = _written, TotalBytes = _total });
+        }
+    }
+
     private void ValidateFile(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);

@@ -6,7 +6,7 @@ namespace SecureFileTransfer.Security;
 /// Factory for creating AES cipher instances with different key sizes (128, 192, 256-bit).
 /// Responsible for key validation and cipher instantiation.
 /// 
-/// This factory creates Aes256CoreImpl instances (fully custom AES from scratch) that work with CbcModeOperations
+/// This factory creates AesCoreImpl instances (fully custom AES from scratch) that work with CbcModeOperations
 /// to provide complete file encryption/decryption functionality.
 /// </summary>
 public class AesCipherFactory
